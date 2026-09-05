@@ -32,3 +32,23 @@ autorisent.
 
 L'audit de clôture fonction par fonction, avec la procédure de recette,
 est dans `AUDIT-FINAL-CLIENT.md`.
+
+## CI/CD (GitHub Actions)
+
+Le workflow `.github/workflows/ci.yml` lance `flutter analyze` + `flutter test`
+puis un build `flutter build apk --debug` à chaque push/PR sur `main`.
+`android/app/google-services.json` n'est jamais commité (voir `.gitignore`) ;
+la CI le reconstruit à partir d'un secret du dépôt GitHub.
+
+Pour configurer ce secret sur le dépôt GitHub :
+
+1. Encoder le fichier en base64 en local :
+   ```
+   base64 -w0 android/app/google-services.json
+   ```
+2. Dans le dépôt GitHub : Settings → Secrets and variables → Actions →
+   New repository secret.
+3. Nom : `GOOGLE_SERVICES_JSON_BASE64`, valeur : le texte obtenu à l'étape 1.
+
+L'APK debug produit est téléchargeable comme artefact du run, dans l'onglet
+Actions du dépôt.

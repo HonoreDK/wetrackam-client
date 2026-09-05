@@ -1,0 +1,13 @@
+⚠️ google-services.json officiel requis — aucun fichier factice n'est fourni ⚠️
+
+Déposer ici le fichier téléchargé depuis le projet Firebase officiel
+WeTrackam. Son application Android doit porter exactement le package
+`org.traccar.client`.
+
+Les builds release/profile échouent volontairement si le fichier est absent,
+factice ou destiné à un autre package. Un APK qui démarre sans push ne doit
+jamais être présenté comme une livraison fonctionnelle.
+
+Ne jamais committer ni fabriquer les secrets Firebase. Après installation,
+valider sur appareil réel l'enregistrement du jeton, un message et un appel
+entrant lorsque l'application est terminée.

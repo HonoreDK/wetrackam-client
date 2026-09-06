@@ -122,7 +122,15 @@ class TlsPinning {
       }
       final payload = jsonDecode(utf8.decode(payloadBytes)) as Map<String, dynamic>;
       if (expectedServerId != null && payload['serverId'] != expectedServerId) {
-        throw const TlsPinningException('Identité du serveur incohérente');
+        // Motif explicite : c'est exactement la panne qui rendait tout
+        // appairage impossible quand le serveur signait son nom de domaine
+        // au lieu de son identite d'installation. Un message generique
+        // rendait le diagnostic impossible a distance.
+        throw TlsPinningException(
+            'Identité du serveur incohérente entre l’appairage et les '
+            'empreintes TLS signées (reçu « ${payload['serverId']} », '
+            'attendu « $expectedServerId »). Le serveur doit republier son '
+            'jeu d’empreintes.');
       }
       final pins = (payload['pins'] as List?)?.cast<String>();
       final seq = (payload['seq'] as num?)?.toInt();

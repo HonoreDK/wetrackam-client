@@ -25,20 +25,23 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:asn1lib/asn1lib.dart';
-import 'package:crypto/crypto.dart' as crypto;
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 
 import 'app_logger.dart';
+import 'spki_sha256.dart';
 
 class TlsPinningException implements Exception {
+  final String code;
   final String message;
-  const TlsPinningException(this.message);
+  final String? host;
+  final String? observedPin;
+  const TlsPinningException(this.message,
+      {this.code = 'tlsPinningError', this.host, this.observedPin});
   @override
-  String toString() => 'TlsPinningException: $message';
+  String toString() => 'TlsPinningException($code): $message';
 }
 
 class TlsPinning {
@@ -59,9 +62,15 @@ class TlsPinning {
   static Set<String> _pins = {};
   static DateTime? _notAfter;
   static final Set<String> _expectedHosts = {};
+  static TlsPinningException? _lastRejection;
 
   static String? get serverId => _serverId; // exposé pour l'adressage (chantier B) — même serverId, un seul point de stockage
   static bool get isBootstrapped => _anchorPublicKey != null && _pins.isNotEmpty;
+  static TlsPinningException? takeLastRejection() {
+    final rejection = _lastRejection;
+    _lastRejection = null;
+    return rejection;
+  }
 
   /// ⚠️ OBSOLÈTE depuis DELTA-v7.7-QR-APPAIRAGE.md §6 (v7.8) : "L'application
   /// ne doit plus imposer https:// en local". Plus aucun appelant dans le
@@ -373,11 +382,14 @@ class TlsPinning {
   // Vérification à chaque handshake TLS
   // -------------------------------------------------------------------
   static bool _acceptCertificate(X509Certificate cert, String host, int port) {
+    _lastRejection = null;
     // Barrière 1, indépendante du hash : protège contre le piège connu du
     // certificat intermédiaire livré au callback à la place du certificat
     // serveur (voir historique de ce module, Dart SDK issue #39425).
     if (_expectedHosts.isNotEmpty && !_expectedHosts.contains(host)) {
       AppLogger.error('tls_pin_host_mismatch', '$host not in $_expectedHosts');
+      _lastRejection = TlsPinningException('Hôte TLS inattendu',
+          code: 'tlsHostMismatch', host: host);
       return false;
     }
     if (_pins.isEmpty) {
@@ -385,6 +397,8 @@ class TlsPinning {
       // appairage, ou après un reset) signifie aucune connexion TLS
       // épinglée possible, jamais un repli permissif.
       AppLogger.error('tls_pin_no_pins_available', host);
+      _lastRejection = TlsPinningException('Jeu TLS indisponible',
+          code: 'tlsPinsetUnavailable', host: host);
       return false;
     }
     // Anomalie corrigée : `_notAfter` était calculé et persisté à chaque
@@ -396,42 +410,30 @@ class TlsPinning {
     // périmé plutôt qu'absent.
     if (_notAfter != null && DateTime.now().isAfter(_notAfter!)) {
       AppLogger.error('tls_pin_set_expired', host);
+      _lastRejection = TlsPinningException('Jeu TLS expiré',
+          code: 'tlsPinsetUnavailable', host: host);
       return false;
     }
     try {
-      final spkiHashBase64 = _spkiSha256Base64(cert.der);
+      final spkiHashBase64 = spkiSha256Base64(cert.der);
       final match = _pins.contains(spkiHashBase64);
       if (!match) {
-        // Diagnostic temporaire : donner à Victor l'empreinte exacte du
-        // certificat réellement servi par le serveur de production, à
-        // comparer avec celles publiées dans le pinset signé — pour
-        // distinguer une rotation de certificat non répercutée dans le
-        // pinset d'une véritable substitution de serveur.
-        AppLogger.error('tls_pin_mismatch',
-            'host=$host received=[$spkiHashBase64] expectedPins=$_pins');
+        AppLogger.error(
+            'tls_pin_mismatch', 'host=$host pin=sha256/$spkiHashBase64');
+        _lastRejection = TlsPinningException(
+            'Le certificat reçu ne figure pas dans le jeu signé',
+            code: 'tlsCertificateMismatch',
+            host: host,
+            observedPin: 'sha256/$spkiHashBase64');
       }
       return match;
     } catch (error) {
       // Fail-close : toute incertitude sur le certificat vaut refus.
       AppLogger.error('tls_pin_parse_failed', error);
+      _lastRejection = TlsPinningException('Certificat TLS illisible',
+          code: 'tlsCertificateInvalid', host: host);
       return false;
     }
-  }
-
-  /// Extrait la SubjectPublicKeyInfo d'un certificat X.509 DER et retourne
-  /// son SHA-256 en base64 standard (avec padding) — format aligné sur
-  /// celui des empreintes `sha256/<base64>` envoyées par le serveur (§4,
-  /// §5). Traversée ASN.1 identique à la version précédente de ce module
-  /// (Certificate ::= SEQUENCE { tbsCertificate, ... }, tbsCertificate
-  /// ::= SEQUENCE { ..., subjectPublicKeyInfo, ... }, index 6 en
-  /// supposant un certificat X.509v3 avec champ version explicite).
-  static String _spkiSha256Base64(Uint8List certDer) {
-    final certSeq = ASN1Parser(certDer).nextObject() as ASN1Sequence;
-    final tbsCertificate = certSeq.elements[0] as ASN1Sequence;
-    final subjectPublicKeyInfo = tbsCertificate.elements[6] as ASN1Sequence;
-    final spkiDerBytes = subjectPublicKeyInfo.encodedBytes;
-    final digest = crypto.sha256.convert(spkiDerBytes);
-    return base64.encode(digest.bytes);
   }
 
   /// Client REST épinglé.

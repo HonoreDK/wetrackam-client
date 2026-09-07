@@ -166,16 +166,6 @@ class StateSyncService {
     final eventId = message['eventId'] as String?;
     final seq = message['seq'] as int?;
 
-    // §9.2 — dédoublonnage sur eventId (le serveur peut réessayer un envoi
-    // après une micro-coupure : le doublon est normal, pas une erreur).
-    if (eventId != null) {
-      if (_seenEventIds.contains(eventId)) {
-        AppLogger.breadcrumb('control_duplicate_ignored:$eventId');
-        return;
-      }
-      _seenEventIds.add(eventId);
-      if (_seenEventIds.length > 500) _seenEventIds.remove(_seenEventIds.first);
-    }
     // §9.2 — un seq inférieur ou égal au dernier reçu est un message en
     // retard, à ignorer. Comparaison indépendante de eventId : un message
     // sans eventId (versions serveur antérieures ?) reste protégé par seq.
@@ -185,6 +175,17 @@ class StateSyncService {
         return;
       }
       _lastSeq = seq;
+    }
+    // Ne mémoriser l'identifiant qu'après le contrôle de séquence : un
+    // événement en retard ne doit pas consommer l'identifiant d'un futur
+    // message valide reçu par l'autre canal (socket/FCM).
+    if (eventId != null) {
+      if (_seenEventIds.contains(eventId)) {
+        AppLogger.breadcrumb('control_duplicate_ignored:$eventId');
+        return;
+      }
+      _seenEventIds.add(eventId);
+      if (_seenEventIds.length > 500) _seenEventIds.remove(_seenEventIds.first);
     }
 
     // FLUX-JETON-FCM.md §2 : "push.stale ne fait pas bouger l'epoch" —

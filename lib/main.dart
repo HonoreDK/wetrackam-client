@@ -4,9 +4,9 @@ import 'dart:developer' as developer;
 import 'package:flutter/material.dart';
 import 'package:app_links/app_links.dart';
 import 'package:rate_my_app/rate_my_app.dart';
-import 'package:traccar_client/geolocation_service.dart';
-import 'package:traccar_client/password_service.dart';
-import 'package:traccar_client/quick_actions.dart';
+import 'package:wetrackam_client/geolocation_service.dart';
+import 'package:wetrackam_client/password_service.dart';
+import 'package:wetrackam_client/quick_actions.dart';
 
 import 'l10n/app_localizations.dart';
 import 'preferences.dart';

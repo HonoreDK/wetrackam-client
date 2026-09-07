@@ -40,6 +40,12 @@ class ErrorCatalog {
     // --- 401 invalidCredentials (driver-auth uniquement — les autres 401
     // passent par `unauthorized(reason)`, indexés par reason et non error)
     'invalidCredentials': 'Code PIN incorrect.',
+    'invalidAuthResponse': 'Réponse de connexion invalide. Contactez le support.',
+    'tlsHostMismatch': 'L’adresse du serveur ne correspond pas à l’appairage. Recommencez l’appairage.',
+    'tlsPinsetUnavailable': 'Les informations de sécurité du serveur sont indisponibles. Contactez votre gestionnaire.',
+    'tlsCertificateMismatch': 'Le certificat de sécurité du serveur a changé sans validation. Contactez votre gestionnaire.',
+    'tlsCertificateInvalid': 'Le certificat de sécurité du serveur est illisible. Contactez le support.',
+    'tlsIdentityMismatch': 'L’identité du serveur a changé. Recommencez l’appairage.',
 
     // --- 403 — communs à plusieurs endpoints
     'notADriverSession': 'Session invalide. Reconnectez-vous.',

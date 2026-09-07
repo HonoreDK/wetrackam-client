@@ -2,8 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:traccar_client/l10n/app_localizations.dart';
-import 'package:traccar_client/preferences.dart';
+import 'package:wetrackam_client/l10n/app_localizations.dart';
+import 'package:wetrackam_client/preferences.dart';
 
 class PasswordService {
   static final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();

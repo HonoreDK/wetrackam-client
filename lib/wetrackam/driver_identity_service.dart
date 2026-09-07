@@ -26,7 +26,7 @@ class ProvisioningData {
   final String? driverName;
   // EPINGLAGE-TLS.md §3 — champs ajoutés à la charge utile d'appairage.
   // Nullable uniquement pour relire puis purger proprement un ancien stockage.
-  // V16 ne persiste jamais un nouveau provisionnement sans ces champs.
+  // V17 ne persiste jamais un nouveau provisionnement sans ces champs.
   final String? tlsPinsetPublicKey; // base64 standard, 32 octets bruts
   final String? tlsPinsUrl;
   final List<String>? tlsPins;
@@ -49,7 +49,8 @@ class ProvisioningData {
 class AuthSession {
   final String token;
   final DateTime? expiresAt;
-  const AuthSession({required this.token, this.expiresAt});
+  final int? sessionEpoch;
+  const AuthSession({required this.token, this.expiresAt, this.sessionEpoch});
 }
 
 typedef PurgeHook = Future<void> Function();
@@ -65,6 +66,7 @@ class DriverIdentityService {
   static const _keyDriverName = 'wetrackam_driver_name';
   static const _keyToken = 'wetrackam_token';
   static const _keyExpiresAt = 'wetrackam_expires_at';
+  static const _keySessionEpoch = 'wetrackam_session_epoch';
   static const _flagHasRunBefore = 'wetrackam_has_run_before';
 
   static ProvisioningData? _provisioning;
@@ -148,6 +150,8 @@ class DriverIdentityService {
       _session = AuthSession(
         token: token,
         expiresAt: expiresAtStr != null ? DateTime.tryParse(expiresAtStr) : null,
+        sessionEpoch: int.tryParse(
+            await _storage.read(key: _keySessionEpoch) ?? ''),
       );
     }
     AppLogger.breadcrumb('identity_restored:prov=$isProvisioned,auth=$isAuthenticated');
@@ -234,6 +238,14 @@ class DriverIdentityService {
     if (session.expiresAt != null) {
       await _storage.write(
           key: _keyExpiresAt, value: session.expiresAt!.toIso8601String());
+    } else {
+      await _storage.delete(key: _keyExpiresAt);
+    }
+    if (session.sessionEpoch != null) {
+      await _storage.write(
+          key: _keySessionEpoch, value: session.sessionEpoch.toString());
+    } else {
+      await _storage.delete(key: _keySessionEpoch);
     }
     _session = session;
     AppLogger.breadcrumb('authentication_completed');
@@ -247,6 +259,7 @@ class DriverIdentityService {
     }
     await _storage.delete(key: _keyToken);
     await _storage.delete(key: _keyExpiresAt);
+    await _storage.delete(key: _keySessionEpoch);
     _session = null;
     for (final hook in _postPurgeHooks) {
       await _safe(hook);

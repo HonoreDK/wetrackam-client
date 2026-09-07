@@ -4,7 +4,7 @@
 // Toute régression ici réactive silencieusement une fonction coupée par
 // l'exploitant : c'est le test le plus important du fichier.
 import 'package:flutter_test/flutter_test.dart';
-import 'package:traccar_client/wetrackam/rtc_config_service.dart';
+import 'package:wetrackam_client/wetrackam/rtc_config_service.dart';
 
 void main() {
   group('RtcPolicy.normalizeEnum', () {

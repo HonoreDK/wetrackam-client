@@ -62,9 +62,12 @@ android {
     }
     buildTypes {
         release {
-            if (keystorePropertiesFile.exists()) {
-                signingConfig = signingConfigs.getByName("release")
+            if (!keystorePropertiesFile.exists()) {
+                throw GradleException(
+                    "Signature Android absente : fournir environment/key.properties et le keystore officiel"
+                )
             }
+            signingConfig = signingConfigs.getByName("release")
             isShrinkResources = false
         }
     }

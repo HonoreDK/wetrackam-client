@@ -15,11 +15,13 @@ import 'theme.dart';
 class ServerUnreachableScreen extends StatefulWidget {
   final Future<bool> Function() onRetry;
   final VoidCallback onReachable;
+  final String? message;
 
   const ServerUnreachableScreen({
     super.key,
     required this.onRetry,
     required this.onReachable,
+    this.message,
   });
 
   @override
@@ -57,9 +59,9 @@ class _ServerUnreachableScreenState extends State<ServerUnreachableScreen> {
                     style: Theme.of(context).textTheme.headlineMedium,
                     textAlign: TextAlign.center),
                 const SizedBox(height: 12),
-                const Text(
-                  'Vérifiez votre connexion internet. Si le problème '
-                  'persiste, contactez votre gestionnaire.',
+                Text(
+                  widget.message ?? 'Vérifiez votre connexion internet. Si le problème '
+                      'persiste, contactez votre gestionnaire.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: WetrackamColors.slate),
                 ),

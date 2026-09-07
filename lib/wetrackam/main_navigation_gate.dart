@@ -49,6 +49,7 @@ class _PingGate extends StatefulWidget {
 
 class _PingGateState extends State<_PingGate> {
   bool? _reachable; // null = vérification en cours
+  String? _securityError;
 
   @override
   void initState() {
@@ -57,9 +58,28 @@ class _PingGateState extends State<_PingGate> {
   }
 
   Future<void> _check() async {
-    setState(() => _reachable = null);
-    final ok = await WetrackamApiClient.ping();
-    if (mounted) setState(() => _reachable = ok);
+    setState(() {
+      _reachable = null;
+      _securityError = null;
+    });
+    try {
+      final ok = await WetrackamApiClient.pingOrThrow();
+      if (mounted) setState(() => _reachable = ok);
+    } on TlsTransportException catch (error) {
+      if (mounted) {
+        setState(() {
+          _reachable = false;
+          _securityError = error.error;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _reachable = false;
+          _securityError = null;
+        });
+      }
+    }
   }
 
   @override
@@ -69,6 +89,9 @@ class _PingGateState extends State<_PingGate> {
     }
     if (_reachable == false) {
       return ServerUnreachableScreen(
+        message: _securityError == null
+            ? null
+            : 'La sécurité du serveur ne correspond plus à cet appairage. Contactez votre gestionnaire.',
         onRetry: WetrackamApiClient.ping,
         onReachable: () => setState(() => _reachable = true),
       );

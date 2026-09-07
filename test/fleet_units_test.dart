@@ -1,6 +1,6 @@
 // test/fleet_units_test.dart — carte des collègues : unités de vitesse.
 import 'package:flutter_test/flutter_test.dart';
-import 'package:traccar_client/wetrackam/fleet_units.dart';
+import 'package:wetrackam_client/wetrackam/fleet_units.dart';
 
 void main() {
   group('FleetUnits', () {

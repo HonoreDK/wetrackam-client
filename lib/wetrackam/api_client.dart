@@ -57,6 +57,13 @@ class NetworkException extends ApiException {
   const NetworkException() : super(null, 'network_error');
 }
 
+class TlsTransportException extends ApiException {
+  final String? host;
+  final String? observedPin;
+  const TlsTransportException(String code, {this.host, this.observedPin})
+      : super(null, code);
+}
+
 class WetrackamApiClient {
   WetrackamApiClient._();
 
@@ -98,6 +105,8 @@ class WetrackamApiClient {
       'Accept': 'application/json',
       'Authorization': 'Bearer ${session.token}',
       'X-Driver-Id': driverId,
+      if (session.sessionEpoch != null)
+        'X-Session-Epoch': session.sessionEpoch.toString(),
     };
   }
 
@@ -160,6 +169,11 @@ class WetrackamApiClient {
     } on TimeoutException {
       throw const NetworkException();
     } on http.ClientException {
+      final tls = TlsPinning.takeLastRejection();
+      if (tls != null) {
+        throw TlsTransportException(tls.code,
+            host: tls.host, observedPin: tls.observedPin);
+      }
       throw const NetworkException();
     }
   }
@@ -180,21 +194,25 @@ class WetrackamApiClient {
   // clavier PIN si le serveur est clairement injoignable.
   // -----------------------------------------------------------------
   static Future<bool> ping() async {
-    final base = DriverIdentityService.provisioning?.serverUrl;
-    if (base == null) return false; // pas encore provisionné — appelant ne devrait pas appeler ping() dans ce cas
     try {
-      final uri = Uri.parse('$base/api/mobile/ping');
-      final response = await _client
-          .get(uri, headers: {'Accept': 'application/json'})
-          .timeout(const Duration(seconds: 5));
-      if (response.statusCode != 200) return false;
-      final json = jsonDecode(response.body) as Map<String, dynamic>;
-      return json['ok'] == true;
+      return await pingOrThrow();
     } catch (_) {
-      // Timeout, DNS, connexion refusée... : toute exception ici veut dire
-      // "injoignable", pas la peine de distinguer la cause pour l'écran.
       return false;
     }
+  }
+
+  /// Variante utilisée par l'écran de garde afin de ne pas confondre une
+  /// panne réseau avec un refus de l'identité TLS épinglée.
+  static Future<bool> pingOrThrow() async {
+    final base = DriverIdentityService.provisioning?.serverUrl;
+    if (base == null) return false; // pas encore provisionné — appelant ne devrait pas appeler ping() dans ce cas
+    final uri = Uri.parse('$base/api/mobile/ping');
+    final response = await _send(() => _client
+          .get(uri, headers: {'Accept': 'application/json'})
+          .timeout(const Duration(seconds: 5)));
+    if (response.statusCode != 200) return false;
+    final json = jsonDecode(response.body) as Map<String, dynamic>;
+    return json['ok'] == true;
   }
 
   // -----------------------------------------------------------------
@@ -312,7 +330,16 @@ class WetrackamApiClient {
             body: jsonEncode({'driverUniqueId': driverUniqueId, 'pin': pin}))
         .timeout(_readTimeout));
     if (response.statusCode == 200) {
-      return jsonDecode(response.body) as Map<String, dynamic>;
+      final body = jsonDecode(response.body);
+      if (body is! Map<String, dynamic> ||
+          body['token'] is! String ||
+          (body['token'] as String).isEmpty ||
+          body['tenantId'] == null ||
+          body['sessionEpoch'] is! num) {
+        AppLogger.error('driver_auth_invalid_response', 'required fields missing');
+        throw const ApiException(502, 'invalidAuthResponse');
+      }
+      return body;
     }
     final body = _parseError(response);
     throw ApiException(
@@ -358,7 +385,10 @@ class WetrackamApiClient {
         .post(_uri('/api/mobile/shift/start'), headers: headers, body: jsonEncode(body))
         .timeout(_readTimeout));
     if (response.statusCode == 200) {
-      return jsonDecode(response.body) as Map<String, dynamic>;
+      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      final tenantId = json['tenantId']?.toString();
+      if (tenantId != null) await DriverIdentityService.checkTenantDrift(tenantId);
+      return json;
     }
     final errorBody = _parseError(response);
     throw ApiException(response.statusCode, errorBody['error']?.toString() ?? 'unknown');
@@ -373,7 +403,10 @@ class WetrackamApiClient {
         _client.get(_uri('/api/mobile/shift/current'), headers: headers)
             .timeout(_readTimeout));
     if (response.statusCode == 200) {
-      return jsonDecode(response.body) as Map<String, dynamic>;
+      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      final tenantId = json['tenantId']?.toString();
+      if (tenantId != null) await DriverIdentityService.checkTenantDrift(tenantId);
+      return json;
     }
     final body = _parseError(response);
     throw ApiException(response.statusCode, body['error']?.toString() ?? 'unknown');
@@ -389,7 +422,10 @@ class WetrackamApiClient {
         .post(_uri('/api/mobile/shift/end'), headers: headers, body: jsonEncode({}))
         .timeout(_readTimeout));
     if (response.statusCode == 200) {
-      return jsonDecode(response.body) as Map<String, dynamic>;
+      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      final tenantId = json['tenantId']?.toString();
+      if (tenantId != null) await DriverIdentityService.checkTenantDrift(tenantId);
+      return json;
     }
     final body = _parseError(response);
     throw ApiException(response.statusCode, body['error']?.toString() ?? 'unknown');
@@ -414,7 +450,7 @@ class WetrackamApiClient {
   }
 
   // -----------------------------------------------------------------
-  // V16 — SOS idempotent raccordé au socle de détresse serveur
+  // V17 — SOS idempotent raccordé au socle de détresse serveur
   // -----------------------------------------------------------------
   static Future<Map<String, dynamic>> raiseDistress({
     required String alertId,
@@ -628,7 +664,10 @@ class WetrackamApiClient {
         _client.get(_uri('/api/mobile/fleet/live'), headers: headers)
             .timeout(_readTimeout));
     if (response.statusCode == 200) {
-      return jsonDecode(response.body) as Map<String, dynamic>;
+      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      final tenantId = json['tenantId']?.toString();
+      if (tenantId != null) await DriverIdentityService.checkTenantDrift(tenantId);
+      return json;
     }
     final body = _parseError(response);
     throw ApiException(response.statusCode, body['error']?.toString() ?? 'unknown');
@@ -659,7 +698,10 @@ class WetrackamApiClient {
         _client.get(_uri('/api/mobile/state'), headers: headers)
             .timeout(_readTimeout));
     if (response.statusCode == 200) {
-      return jsonDecode(response.body) as Map<String, dynamic>;
+      final json = jsonDecode(response.body) as Map<String, dynamic>;
+      final tenantId = json['tenantId']?.toString();
+      if (tenantId != null) await DriverIdentityService.checkTenantDrift(tenantId);
+      return json;
     }
     final body = _parseError(response);
     throw ApiException(response.statusCode, body['error']?.toString() ?? 'unknown');

@@ -76,7 +76,7 @@
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="wetrackam"/>
             </intent-filter>
-            <!-- V16 : vrai Android App Link vérifié par assetlinks.json. -->
+            <!-- V17 : vrai Android App Link vérifié par assetlinks.json. -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>

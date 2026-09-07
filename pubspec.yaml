@@ -1,7 +1,7 @@
-name: traccar_client
-description: "Traccar Client"
+name: wetrackam_client
+description: "Application chauffeur WeTrackam"
 publish_to: 'none'
-version: 16.0.0+160
+version: 17.0.0+170
 
 environment:
   sdk: ^3.7.2
@@ -36,7 +36,6 @@ dependencies:
   firebase_core: ^3.8.0
   firebase_messaging: ^15.1.6
   crypto: ^3.0.6
-  asn1lib: ^1.5.5
   cryptography: ^2.7.0
   # Lot 6 — WebSocket temps réel (service distinct de Traccar, §2 v5)
   web_socket_channel: ^3.0.1

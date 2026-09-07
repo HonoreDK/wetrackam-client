@@ -129,6 +129,7 @@ class _PinAuthScreenState extends State<PinAuthScreen> {
         expiresAt: response['expiresAt'] != null
             ? DateTime.tryParse(response['expiresAt'] as String)
             : null,
+        sessionEpoch: (response['sessionEpoch'] as num).toInt(),
       ));
       await DriverIdentityService.clearPinLockout();
       AppLogger.breadcrumb('pin_auth_success');
@@ -152,13 +153,18 @@ class _PinAuthScreenState extends State<PinAuthScreen> {
         Navigator.of(context).pushReplacement(
             MaterialPageRoute(builder: (_) => const EligibilityScreen()));
       }
+    } on TlsTransportException catch (error) {
+      _pinController.clear();
+      AppLogger.error('pin_auth_tls_${error.error}',
+          'host=${error.host} observed=${error.observedPin ?? 'unavailable'}');
+      if (mounted) setState(() => _error = ErrorCatalog.http(error: error.error));
     } on NetworkException {
       // Anomalie corrigée (dead_code_on_catch_subtype) : cette clause était
       // placée APRÈS `on ApiException`, qui l'interceptait déjà (elle en
       // hérite) — jamais atteinte, le message réseau spécifique ne
       // s'affichait donc jamais réellement.
       _pinController.clear();
-      setState(() => _error = 'Connexion impossible. Vérifiez le réseau.');
+      if (mounted) setState(() => _error = 'Connexion impossible. Vérifiez le réseau.');
     } on ApiException catch (error) {
       _pinController.clear(); // §5.1 — jamais conservé, même après échec
       if (error.statusCode == 423 || error.statusCode == 429) {
@@ -166,20 +172,22 @@ class _PinAuthScreenState extends State<PinAuthScreen> {
             (error.retryAfterMs != null ? (error.retryAfterMs! / 1000).ceil() : 60);
         final until = DateTime.now().add(Duration(seconds: seconds));
         await DriverIdentityService.setPinLockout(until);
-        setState(() {
-          _lockedUntil = until;
-          _error = error.statusCode == 429
-              ? 'Trop de tentatives depuis ce réseau.'
-              : null;
-        });
+        if (mounted) {
+          setState(() {
+            _lockedUntil = until;
+            _error = error.statusCode == 429
+                ? 'Trop de tentatives depuis ce réseau.'
+                : null;
+          });
+        }
         _startTicking();
       } else {
-        setState(() => _error = ErrorCatalog.driverAuth(error.error));
+        if (mounted) setState(() => _error = ErrorCatalog.driverAuth(error.error));
       }
     } catch (error) {
       _pinController.clear();
       AppLogger.error('pin_auth_unexpected', error);
-      setState(() => _error = 'Une erreur est survenue. Réessayez.');
+      if (mounted) setState(() => _error = 'Une erreur est survenue. Réessayez.');
     } finally {
       if (mounted) setState(() => _loading = false);
     }

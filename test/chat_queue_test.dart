@@ -8,7 +8,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:traccar_client/wetrackam/chat_service.dart';
+import 'package:wetrackam_client/wetrackam/chat_service.dart';
 
 const _queueKey = 'wetrackam_chat_pending_queue';
 

@@ -401,7 +401,15 @@ class TlsPinning {
     try {
       final spkiHashBase64 = _spkiSha256Base64(cert.der);
       final match = _pins.contains(spkiHashBase64);
-      if (!match) AppLogger.error('tls_pin_mismatch', 'host=$host');
+      if (!match) {
+        // Diagnostic temporaire : donner à Victor l'empreinte exacte du
+        // certificat réellement servi par le serveur de production, à
+        // comparer avec celles publiées dans le pinset signé — pour
+        // distinguer une rotation de certificat non répercutée dans le
+        // pinset d'une véritable substitution de serveur.
+        AppLogger.error('tls_pin_mismatch',
+            'host=$host received=[$spkiHashBase64] expectedPins=$_pins');
+      }
       return match;
     } catch (error) {
       // Fail-close : toute incertitude sur le certificat vaut refus.

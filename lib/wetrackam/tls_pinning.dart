@@ -26,7 +26,6 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
-import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
@@ -426,17 +425,6 @@ class TlsPinning {
             code: 'tlsCertificateMismatch',
             host: host,
             observedPin: 'sha256/$spkiHashBase64');
-        // ⚠️ ÉCHAPPATOIRE TEMPORAIRE DEBUG UNIQUEMENT — contourne le pinset
-        // en attendant que le serveur republie un pinset correspondant à
-        // son certificat réel (bug serveur confirmé, cf. tls_pin_mismatch).
-        // kDebugMode garantit que ceci ne peut PAS exister dans un build
-        // release/profile. À RETIRER dès que le serveur est corrigé — ne
-        // jamais laisser traîner, ne jamais dupliquer ailleurs.
-        if (kDebugMode) {
-          AppLogger.error('tls_pin_mismatch_DEBUG_BYPASS',
-              'host=$host — connexion acceptée malgré le mismatch (build debug uniquement)');
-          return true;
-        }
       }
       return match;
     } catch (error) {

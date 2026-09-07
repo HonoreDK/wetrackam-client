@@ -47,8 +47,8 @@ class TenantDisabledException extends ApiException {
 }
 
 class RateLimitedException extends ApiException {
-  const RateLimitedException({int? retryAfterSeconds, String? scope})
-      : super(429, 'rate_limited', retryAfterSeconds: retryAfterSeconds, scope: scope);
+  const RateLimitedException({super.retryAfterSeconds, super.scope})
+      : super(429, 'rate_limited');
 }
 
 /// Aucune réponse du tout (timeout, DNS, etc.) — distinct d'une réponse

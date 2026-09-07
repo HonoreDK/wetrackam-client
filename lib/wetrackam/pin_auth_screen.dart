@@ -193,12 +193,48 @@ class _PinAuthScreenState extends State<PinAuthScreen> {
     }
   }
 
+  /// Efface l'appairage local (aucun appel serveur : l'écran PIN est
+  /// atteint AVANT toute session authentifiée, donc `unbind()` n'est pas
+  /// utilisable ici) et revient à l'écran de scan QR.
+  Future<void> _forgetPairing() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Oublier cet appairage ?'),
+        content: const Text(
+            'Vous devrez scanner à nouveau le code QR fourni par votre gestionnaire.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Annuler')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Confirmer')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await DriverIdentityService.purgeAll();
+    AppLogger.breadcrumb('pairing_forgotten_from_pin_screen');
+    if (mounted) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const ProvisioningScreen()),
+        (route) => false,
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final driverName = DriverIdentityService.provisioning?.driverName;
     final locked = _lockedUntil != null;
     return Scaffold(
       backgroundColor: WetrackamColors.lilacTint,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          tooltip: 'Oublier cet appairage et rescanner',
+          onPressed: _loading ? null : _forgetPairing,
+        ),
+      ),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(24),

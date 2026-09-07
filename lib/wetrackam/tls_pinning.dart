@@ -90,6 +90,18 @@ class TlsPinning {
     required String? expectedServerId,
   }) async {
     try {
+      final payloadValue = signedPinset['payload'];
+      final signatureValue = signedPinset['signature'];
+      if (signedPinset['available'] != true ||
+          payloadValue is! String || payloadValue.trim().isEmpty ||
+          signatureValue is! String || signatureValue.trim().isEmpty) {
+        throw const TlsPinningException(
+            'Le serveur n’a pas encore publié ses empreintes TLS signées');
+      }
+      if (publicKeyBase64.trim().isEmpty ||
+          expectedServerId == null || expectedServerId.trim().isEmpty) {
+        throw const TlsPinningException('Identité TLS du serveur indisponible');
+      }
       // Diagnostic temporaire : voir les valeurs brutes AVANT tout décodage,
       // pour savoir exactement laquelle échoue (clé publique, payload, ou
       // signature) plutôt qu'un FormatException générique sans contexte.
@@ -102,9 +114,9 @@ class TlsPinning {
       final keyBytes = base64.decode(publicKeyBase64);
       AppLogger.breadcrumb('tls_pairing_pinset_keybytes_decoded:${keyBytes.length}');
       if (keyBytes.length != 32) throw const FormatException();
-      final payloadBytes = _decodeBase64UrlNoPad(signedPinset['payload'] as String);
+      final payloadBytes = _decodeBase64UrlNoPad(payloadValue);
       AppLogger.breadcrumb('tls_pairing_pinset_payload_decoded:${payloadBytes.length}');
-      final signatureBytes = _decodeBase64UrlNoPad(signedPinset['signature'] as String);
+      final signatureBytes = _decodeBase64UrlNoPad(signatureValue);
       AppLogger.breadcrumb('tls_pairing_pinset_signature_decoded:${signatureBytes.length}');
       final key = SimplePublicKey(keyBytes, type: KeyPairType.ed25519);
       final valid = await Ed25519().verify(
@@ -121,7 +133,7 @@ class TlsPinning {
         throw const FormatException();
       }
       final payload = jsonDecode(utf8.decode(payloadBytes)) as Map<String, dynamic>;
-      if (expectedServerId != null && payload['serverId'] != expectedServerId) {
+      if (payload['serverId'] != expectedServerId) {
         // Motif explicite : c'est exactement la panne qui rendait tout
         // appairage impossible quand le serveur signait son nom de domaine
         // au lieu de son identite d'installation. Un message generique

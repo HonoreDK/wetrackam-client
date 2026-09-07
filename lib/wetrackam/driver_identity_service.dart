@@ -25,10 +25,8 @@ class ProvisioningData {
   final String driverUniqueId;
   final String? driverName;
   // EPINGLAGE-TLS.md §3 — champs ajoutés à la charge utile d'appairage.
-  // Optionnels ici uniquement pour ne pas casser un ancien flux de test
-  // sans ces champs ; en pratique, absents => TlsPinning reste "non
-  // amorcé" (fail-close : aucune connexion TLS possible tant qu'aucun
-  // appairage complet n'a eu lieu, voir tls_pinning.dart::_acceptCertificate).
+  // Nullable uniquement pour relire puis purger proprement un ancien stockage.
+  // V16 ne persiste jamais un nouveau provisionnement sans ces champs.
   final String? tlsPinsetPublicKey; // base64 standard, 32 octets bruts
   final String? tlsPinsUrl;
   final List<String>? tlsPins;

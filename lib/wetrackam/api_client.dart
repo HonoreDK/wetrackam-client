@@ -414,6 +414,36 @@ class WetrackamApiClient {
   }
 
   // -----------------------------------------------------------------
+  // V16 — SOS idempotent raccordé au socle de détresse serveur
+  // -----------------------------------------------------------------
+  static Future<Map<String, dynamic>> raiseDistress({
+    required String alertId,
+    double? latitude,
+    double? longitude,
+    String kind = 'sos',
+    String? note,
+  }) async {
+    final headers = await _authHeaders();
+    headers['Content-Type'] = 'application/json';
+    final response = await _send(() => _client
+        .post(_uri('/api/distress'), headers: headers, body: jsonEncode({
+          'alertId': alertId,
+          'kind': kind,
+          'source': 'app',
+          if (latitude != null) 'latitude': latitude,
+          if (longitude != null) 'longitude': longitude,
+          if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
+        }))
+        .timeout(_readTimeout));
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    }
+    final body = _parseError(response);
+    throw ApiException(response.statusCode, body['error']?.toString() ?? 'unknown',
+        reason: body['reason']?.toString());
+  }
+
+  // -----------------------------------------------------------------
   // §8.2 — Config dynamique (ETag, cache 60s, appelé au démarrage puis /15min)
   // -----------------------------------------------------------------
   /// Retourne `null` si `304 Not Modified` (l'appelant garde sa dernière

@@ -117,7 +117,8 @@ class _ProvisioningScreenState extends State<ProvisioningScreen> {
       final token = resolved['token'] as String?;
       // Voir avertissement d'en-tête de fichier — useBase préféré, base en repli.
       final useBase = (resolved['useBase'] ?? resolved['base']) as String?;
-      if (token == null || useBase == null) {
+      if (token == null || token.trim().isEmpty ||
+          useBase == null || useBase.trim().isEmpty) {
         setState(() => _error = 'Réponse du serveur incomplète. Réessayez.');
         return;
       }
@@ -165,8 +166,10 @@ class _ProvisioningScreenState extends State<ProvisioningScreen> {
     final responseServerId = response['serverId'] as String?;
     final responsePublicKey = response['tlsPinsetPublicKey'] as String?;
     final pinsUrl = response['tlsPinsUrl'] as String?;
-    if (expectedServerId == null || expectedPinsetPublicKey == null ||
-        responseServerId == null || responsePublicKey == null ||
+    if (expectedServerId == null || expectedServerId.trim().isEmpty ||
+        expectedPinsetPublicKey == null || expectedPinsetPublicKey.trim().isEmpty ||
+        responseServerId == null || responseServerId.trim().isEmpty ||
+        responsePublicKey == null || responsePublicKey.trim().isEmpty ||
         signedPinset == null || pinsUrl == null) {
       throw const TlsPinningException('Réponse d’appairage TLS incomplète');
     }
@@ -179,6 +182,12 @@ class _ProvisioningScreenState extends State<ProvisioningScreen> {
           'expectedServerId=[$expectedServerId] responseServerId=[$responseServerId] '
           'expectedPinsetPublicKey=[$expectedPinsetPublicKey] responsePublicKey=[$responsePublicKey]');
       throw const TlsPinningException('Identité du serveur incohérente');
+    }
+    if (signedPinset['available'] != true ||
+        (signedPinset['payload'] as String?)?.trim().isEmpty != false ||
+        (signedPinset['signature'] as String?)?.trim().isEmpty != false) {
+      throw const TlsPinningException(
+          'Le serveur n’a pas encore publié ses empreintes TLS signées');
     }
     final initialPinset = await TlsPinning.verifyPairingPinset(
       signedPinset: signedPinset,

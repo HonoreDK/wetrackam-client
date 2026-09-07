@@ -8,6 +8,7 @@ import 'package:flutter_background_geolocation/flutter_background_geolocation.da
 import 'l10n/app_localizations.dart';
 import 'password_service.dart';
 import 'wetrackam/app_logger.dart';
+import 'wetrackam/distress_service.dart';
 import 'wetrackam/driver_identity_service.dart';
 import 'wetrackam/shift_service.dart';
 
@@ -78,8 +79,11 @@ class _QuickActionsInitializerState extends State<QuickActionsInitializer> {
           } else {
             try {
               await bg.BackgroundGeolocation.getCurrentPosition(samples: 1, persist: true, extras: {'alarm': 'sos'});
+              await DistressService.raiseSos();
             } catch (error) {
-              developer.log('Failed to send alert', error: error);
+              // DistressService conserve l'alertId : la prochaine tentative sera
+              // un rejeu idempotent, pas une seconde alerte.
+              developer.log('Failed to confirm SOS alert', error: error);
             }
           }
       }

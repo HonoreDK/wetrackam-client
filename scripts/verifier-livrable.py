@@ -61,8 +61,8 @@ if android.exists():
             c.get("client_info", {}).get("android_client_info", {}).get("package_name")
             for c in payload.get("client", [])
         }
-        if "org.traccar.client" not in packages:
-            errors.append("google-services.json ne cible pas org.traccar.client")
+        if "cm.wetrackam.driver" not in packages:
+            errors.append("google-services.json ne cible pas cm.wetrackam.driver")
     except Exception as exc:
         errors.append(f"google-services.json invalide: {exc}")
 

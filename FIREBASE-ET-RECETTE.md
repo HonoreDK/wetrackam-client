@@ -3,9 +3,9 @@
 ## Secrets à fournir avant compilation
 
 - Android : `android/app/google-services.json`, application Firebase
-  `org.traccar.client`.
+  `cm.wetrackam.driver`.
 - iOS : `ios/Runner/GoogleService-Info.plist`, bundle Firebase
-  `org.traccar.client.TraccarClient`.
+  `<TeamID>.cm.wetrackam.driver` (a definir).
 - APNs : clé ou certificat APNs associé au même projet Firebase et profil de
   signature avec la capacité Push Notifications.
 

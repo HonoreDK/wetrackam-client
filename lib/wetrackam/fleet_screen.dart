@@ -307,7 +307,7 @@ class _FleetScreenState extends State<FleetScreen> with WidgetsBindingObserver {
               // Exigé par la politique d'usage des tuiles OSM : un agent
               // identifiable. Omettre ce champ expose à un blocage du réseau
               // de tuiles côté OSM, donc à une carte grise en production.
-              userAgentPackageName: 'org.traccar.client',
+              userAgentPackageName: 'cm.wetrackam.driver',
               maxNativeZoom: 19,
             ),
             MarkerLayer(markers: [for (final peer in located) _marker(peer)]),

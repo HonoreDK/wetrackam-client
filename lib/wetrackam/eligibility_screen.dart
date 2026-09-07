@@ -16,6 +16,7 @@ import 'app_logger.dart';
 import 'directory_screen.dart';
 import 'disabled_tenant_screen.dart';
 import 'diagnostics_screen.dart';
+import 'distress_service.dart';
 import 'driver_identity_service.dart';
 import 'error_catalog.dart';
 import 'fleet_screen.dart';
@@ -105,6 +106,7 @@ class _EligibilityScreenState extends State<EligibilityScreen>
     try {
       final data = await WetrackamApiClient.fetchEligibility();
       _loadedAt = DateTime.now();
+      unawaited(DistressService.retryPending());
       _ttlTimer?.cancel();
       final ttl = (data['ttlSeconds'] as num?)?.toInt() ?? 43200;
       // §6 : "après expiration de ttlSeconds" — re-fetch automatique.

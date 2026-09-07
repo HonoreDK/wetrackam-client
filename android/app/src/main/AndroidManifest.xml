@@ -61,20 +61,30 @@
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
-                <data android:scheme="org.traccar.client"/>
+                <data android:scheme="cm.wetrackam.driver"/>
             </intent-filter>
             <!-- Bug trouvé en vérification : provisioning_screen.dart et
                  main.dart (AppLinks) traitent les liens wetrackam://
                  depuis le tout début du chantier v4/v5, mais ce schéma
                  n'était déclaré nulle part dans le manifeste — Android
                  n'aurait jamais su router un lien tapé depuis WhatsApp
-                 vers l'application. Le schéma org.traccar.client ci-dessus
+                 vers l'application. Le schéma cm.wetrackam.driver ci-dessus
                  est conservé (héritage upstream, inoffensif). -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW"/>
                 <category android:name="android.intent.category.DEFAULT"/>
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="wetrackam"/>
+            </intent-filter>
+            <!-- V16 : vrai Android App Link vérifié par assetlinks.json. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="https" android:host="wetrackam.store"
+                    android:pathPrefix="/api/pair/"/>
+                <data android:scheme="https" android:host="wetrackam.store"
+                    android:pathPrefix="/api/provision/"/>
             </intent-filter>
         </activity>
         <!-- v13 — service de premier plan « microphone » tenu pendant toute

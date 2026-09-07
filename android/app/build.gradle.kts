@@ -62,12 +62,18 @@ android {
     }
     buildTypes {
         release {
-            if (!keystorePropertiesFile.exists()) {
+            if (keystorePropertiesFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            } else if (gradle.startParameter.taskNames.any { it.contains("Release") }) {
+                // Anomalie corrigée : un simple `throw` ici s'exécute à la
+                // CONFIGURATION du script, donc pour TOUT build (y compris
+                // `assembleDebug`) puisque Gradle évalue tous les buildTypes
+                // avant de choisir la tâche à exécuter. Restreint le refus
+                // aux tâches ciblant réellement la variante release.
                 throw GradleException(
                     "Signature Android absente : fournir environment/key.properties et le keystore officiel"
                 )
             }
-            signingConfig = signingConfigs.getByName("release")
             isShrinkResources = false
         }
     }

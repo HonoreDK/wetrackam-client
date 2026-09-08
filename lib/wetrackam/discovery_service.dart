@@ -166,7 +166,13 @@ class DiscoveryService {
     _rtcHttp = nextRtcHttp;
     _media = nextMedia;
     _origins = nextOrigins;
-    final newRebasedAt = body['rebasedAt'] as String?;
+    // Anomalie corrigée : le serveur renvoie tantôt une date texte, tantôt
+    // un entier (0 = jamais rebasé) pour ce champ — un `as String?` direct
+    // levait un TypeError dès qu'il recevait la forme numérique. Un entier
+    // n'est jamais une date exploitable ici : traité comme "pas de rebase
+    // connu", au même titre qu'un champ absent.
+    final rebasedAtRaw = body['rebasedAt'];
+    final newRebasedAt = rebasedAtRaw is String ? rebasedAtRaw : null;
     final changed = newRebasedAt != null && newRebasedAt != _rebasedAt;
     _rebasedAt = newRebasedAt;
 

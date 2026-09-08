@@ -161,7 +161,13 @@ class RealtimeService {
     final uri = Uri.parse(wsUrl).replace(queryParameters: {'ticket': ticket});
     final client = TlsPinning.pinnedRawHttpClient();
     try {
-      final request = await client.openUrl('GET', uri);
+      // Anomalie corrigée : HttpClient.openUrl() ne connaît que http/https —
+      // ws/wss lui sont des schémas inconnus (Invalid argument(s):
+      // Unsupported scheme). La sémantique WebSocket vient des en-têtes
+      // Upgrade envoyés juste après, pas du schéma de l'URI de la requête
+      // HTTP initiale : on doit donc la réécrire en http(s) avant l'appel.
+      final httpUri = uri.replace(scheme: uri.scheme == 'wss' ? 'https' : 'http');
+      final request = await client.openUrl('GET', httpUri);
       request.headers
         ..set('Connection', 'Upgrade')
         ..set('Upgrade', 'websocket')

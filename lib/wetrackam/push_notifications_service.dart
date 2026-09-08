@@ -272,11 +272,17 @@ class PushNotificationsService {
       // registerAfterAuth() -> _retryPendingRegistrationIfAny().
       _queueRetryTimer?.cancel();
       AppLogger.breadcrumb('push_register_deferred_session_invalid');
+    }
+    // Sous-classes d'ApiException AVANT le cas général : placées après,
+    // elles n'étaient jamais atteintes (l'analyseur le signalait en
+    // « dead_code_on_catch_subtype »).
+    on TlsTrustException catch (error) {
+      // Cause non résoluble par un simple réessai : rejouer en boucle
+      // n'aboutirait jamais et masquerait l'incident. L'entrée reste en
+      // file, elle sera retentée après un réappairage.
+      _queueRetryTimer?.cancel();
+      AppLogger.error('push_register_tls_refused', error.toString());
     } on NetworkException {
-      // Anomalie corrigée (dead_code_on_catch_subtype) : placée après `on
-      // ApiException`, qui l'interceptait déjà (elle en hérite) — sans
-      // conséquence fonctionnelle ici (les deux branches appellent
-      // _scheduleQueueRetry()), mais dead code réel à corriger.
       _scheduleQueueRetry();
     } on ApiException catch (error) {
       if (error.statusCode == 400) {

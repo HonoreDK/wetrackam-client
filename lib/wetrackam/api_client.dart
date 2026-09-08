@@ -10,6 +10,7 @@
 // oubliée dans un des deux écrans de score).
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
@@ -57,11 +58,22 @@ class NetworkException extends ApiException {
   const NetworkException() : super(null, 'network_error');
 }
 
-class TlsTransportException extends ApiException {
-  final String? host;
+/// La liaison TLS a été refusée : soit la chaîne n'est pas validée, soit
+/// le certificat servi n'appartient pas au jeu d'empreintes signé.
+///
+/// DISTINCTE de [NetworkException] à dessein : « le réseau est coupé » et
+/// « ce serveur n'est pas celui auquel ce téléphone a été appairé » n'ont
+/// ni la même cause, ni le même geste de réparation. Les confondre, c'est
+/// exactement ce qui produisait un « Une erreur est survenue » muet.
+class TlsTrustException extends ApiException {
+  /// Code de [TlsPinningException] : tlsCertificateMismatch,
+  /// tlsPinsetUnavailable, tlsHostMismatch, tlsCertificateInvalid.
+  final String code;
   final String? observedPin;
-  const TlsTransportException(String code, {this.host, this.observedPin})
-      : super(null, code);
+  const TlsTrustException(this.code, {this.observedPin})
+      : super(null, 'tls_untrusted');
+  @override
+  String toString() => 'TlsTrustException($code)';
 }
 
 class WetrackamApiClient {
@@ -132,14 +144,23 @@ class WetrackamApiClient {
     throw SessionInvalidException(reason);
   }
 
-  static Future<http.Response> _send(Future<http.Response> Function() request) async {
+  /// [sessionAware] : sur les endpoints AUTHENTIFIÉS, un 401 signifie « la
+  /// session n'est plus valable » et déclenche la purge §13.1. Sur les
+  /// endpoints NON authentifiés (driver-auth, provisionnement), un 401
+  /// signifie « ces identifiants sont refusés » — il n'y a aucune session
+  /// à purger, et le traduire en SessionInvalidException écrasait le motif
+  /// réel (`invalidCredentials`) par un `unauthorized` générique que le
+  /// catalogue ne sait pas nommer. C'est ce qui faisait afficher « Une
+  /// erreur est survenue » pour un simple code PIN faux.
+  static Future<http.Response> _send(Future<http.Response> Function() request,
+      {bool sessionAware = true}) async {
     try {
       final response = await request();
       // v6 §9.1 : l'epoch est désormais sur TOUTE réponse /api/mobile/*,
       // pas seulement /state — lu ici, au point de passage unique de
       // toutes les requêtes, plutôt que dupliqué dans chaque méthode.
       StateSyncService.onEpochHeader(response.headers['x-driver-epoch']);
-      if (response.statusCode == 401) {
+      if (sessionAware && response.statusCode == 401) {
         await _handleUnauthorized(response);
       }
       if (response.statusCode == 503) {
@@ -168,12 +189,25 @@ class WetrackamApiClient {
       return response;
     } on TimeoutException {
       throw const NetworkException();
+    } on TlsPinningException catch (error) {
+      // Refus d'épinglage explicite (barrière B) : on garde le motif.
+      throw TlsTrustException(error.code, observedPin: error.observedPin);
+    } on HandshakeException {
+      // Refus au handshake (barrière A). dart:io ne dit pas POURQUOI, mais
+      // TlsPinning a mémorisé le verdict juste avant : on le récupère pour
+      // que l'écran puisse nommer la cause au lieu d'un message générique.
+      final rejection = TlsPinning.takeLastRejection();
+      throw TlsTrustException(rejection?.code ?? 'tlsHandshakeFailed',
+          observedPin: rejection?.observedPin);
+    } on TlsException {
+      final rejection = TlsPinning.takeLastRejection();
+      throw TlsTrustException(rejection?.code ?? 'tlsHandshakeFailed',
+          observedPin: rejection?.observedPin);
     } on http.ClientException {
-      final tls = TlsPinning.takeLastRejection();
-      if (tls != null) {
-        throw TlsTransportException(tls.code,
-            host: tls.host, observedPin: tls.observedPin);
-      }
+      throw const NetworkException();
+    } on SocketException {
+      // Coupure réseau, DNS, hôte injoignable : jamais remontée jusqu'ici
+      // auparavant, elle finissait dans le catch générique des écrans.
       throw const NetworkException();
     }
   }
@@ -297,11 +331,15 @@ class WetrackamApiClient {
     if (uri.scheme != 'https' && uri.scheme != 'http') {
       throw const ApiException(null, 'invalidServerUrl');
     }
-    final response = await _send(() => _bootstrapClient.get(uri, headers: {
-      'Accept': 'application/json',
-      'X-Device-Id': deviceId,
-      'User-Agent': DeviceIdentity.userAgent(),
-    }).timeout(_readTimeout));
+    // Provisionnement : non authentifié lui aussi — un 401 y désigne un
+    // jeton refusé, pas une session à purger.
+    final response = await _send(
+        () => _bootstrapClient.get(uri, headers: {
+              'Accept': 'application/json',
+              'X-Device-Id': deviceId,
+              'User-Agent': DeviceIdentity.userAgent(),
+            }).timeout(_readTimeout),
+        sessionAware: false);
     if (response.statusCode == 200) {
       final body = jsonDecode(response.body) as Map<String, dynamic>;
       if (expectedPinsetPublicKey != null &&
@@ -324,11 +362,20 @@ class WetrackamApiClient {
     final base = DriverIdentityService.provisioning?.serverUrl;
     if (base == null) throw StateError('Provisionnement manquant — bug d\'app.');
     final uri = Uri.parse('$base/api/mobile/driver-auth');
-    final response = await _send(() => _client
-        .post(uri,
-            headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
-            body: jsonEncode({'driverUniqueId': driverUniqueId, 'pin': pin}))
-        .timeout(_readTimeout));
+    final response = await _send(
+        () => _client
+            .post(uri,
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Accept': 'application/json'
+                },
+                body: jsonEncode({'driverUniqueId': driverUniqueId, 'pin': pin}))
+            .timeout(_readTimeout),
+        // Endpoint NON authentifié : un 401 vaut « PIN refusé », pas
+        // « session expirée ». Sans ce drapeau, le motif invalidCredentials
+        // était remplacé par unauthorized et le chauffeur voyait un message
+        // générique au lieu de « Code PIN incorrect ».
+        sessionAware: false);
     if (response.statusCode == 200) {
       final body = jsonDecode(response.body);
       if (body is! Map<String, dynamic> ||

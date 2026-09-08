@@ -41,11 +41,33 @@ class ErrorCatalog {
     // passent par `unauthorized(reason)`, indexés par reason et non error)
     'invalidCredentials': 'Code PIN incorrect.',
     'invalidAuthResponse': 'Réponse de connexion invalide. Contactez le support.',
-    'tlsHostMismatch': 'L’adresse du serveur ne correspond pas à l’appairage. Recommencez l’appairage.',
-    'tlsPinsetUnavailable': 'Les informations de sécurité du serveur sont indisponibles. Contactez votre gestionnaire.',
-    'tlsCertificateMismatch': 'Le certificat de sécurité du serveur a changé sans validation. Contactez votre gestionnaire.',
-    'tlsCertificateInvalid': 'Le certificat de sécurité du serveur est illisible. Contactez le support.',
     'tlsIdentityMismatch': 'L’identité du serveur a changé. Recommencez l’appairage.',
+
+    // --- Réponse serveur inexploitable (200 mais corps invalide)
+    'malformedResponse': 'Réponse du serveur illisible. Réessayez.',
+    'missingToken': 'Réponse du serveur incomplète. Réessayez.',
+
+    // --- Liaison TLS (voir TlsTrustException) ------------------------
+    // Ces motifs ne sont PAS des pannes de réseau : le téléphone a bien
+    // joint une machine, mais ce n'est pas — ou plus — celle à laquelle
+    // il a été appairé. Le geste de réparation est donc le réappairage,
+    // jamais « réessayer ».
+    'tlsCertificateMismatch':
+        'Ce serveur ne correspond pas à celui de votre appairage. '
+            'Par sécurité, la connexion a été refusée. Rescannez le QR '
+            'fourni par votre gestionnaire.',
+    'tlsPinsetUnavailable':
+        'Sécurité du serveur non initialisée sur ce téléphone. '
+            'Rescannez le QR fourni par votre gestionnaire.',
+    'tlsHostMismatch':
+        'Adresse de serveur inattendue. Rescannez le QR fourni par votre '
+            'gestionnaire.',
+    'tlsCertificateInvalid':
+        'Le certificat du serveur est illisible. Réessayez, puis '
+            'prévenez votre gestionnaire si cela persiste.',
+    'tlsHandshakeFailed':
+        'Liaison sécurisée impossible avec le serveur. Vérifiez la date '
+            'et l\'heure du téléphone, puis réessayez.',
 
     // --- 403 — communs à plusieurs endpoints
     'notADriverSession': 'Session invalide. Reconnectez-vous.',
@@ -139,6 +161,19 @@ class ErrorCatalog {
     }
     return http(error: error);
   }
+
+  /// Refus de liaison TLS (voir TlsTrustException). Volontairement séparé
+  /// de `transverse()` : ce n'est ni un code HTTP, ni une panne réseau, et
+  /// le geste attendu du chauffeur n'est pas le même.
+  static String tls(String code) => http(error: code);
+
+  /// Vrai si ce refus TLS ne se réglera pas en réessayant : le téléphone
+  /// doit être réappairé. L'écran peut alors proposer le scan du QR au
+  /// lieu d'un bouton « Réessayer » qui échouerait indéfiniment.
+  static bool tlsNeedsRepairing(String code) =>
+      code == 'tlsCertificateMismatch' ||
+      code == 'tlsPinsetUnavailable' ||
+      code == 'tlsHostMismatch';
 
   /// §15.1 — Les 401, indexés par `reason` (jamais par un message serveur,
   /// et jamais par `error` puisque `error` vaut toujours `"unauthorized"`

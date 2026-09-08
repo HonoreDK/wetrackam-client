@@ -135,6 +135,18 @@ class RealtimeService {
       // recevant — rien à faire de plus ici.
     } on _HandshakeRejected catch (error) {
       _handleHandshakeRejection(error.reason);
+    } on TlsPinningException catch (error) {
+      // Le certificat servi n'appartient pas au jeu signé. Se reconnecter
+      // en boucle ne peut rien y changer et masquerait l'incident : on
+      // s'arrête et on l'annonce, comme pour un incident serveur.
+      AppLogger.error('realtime_tls_refused', error.toString());
+      _setState(RealtimeState.unavailable);
+      _failReadyWaiters();
+    } on TlsTrustException catch (error) {
+      // Même cause, remontée par la couche API (demande de ticket).
+      AppLogger.error('realtime_tls_refused', error.toString());
+      _setState(RealtimeState.unavailable);
+      _failReadyWaiters();
     } catch (error) {
       AppLogger.error('realtime_connect_failed', error);
       _scheduleReconnect();
@@ -156,6 +168,11 @@ class RealtimeService {
         ..set('Sec-WebSocket-Version', '13')
         ..set('Sec-WebSocket-Key', _generateWebSocketKey());
       final response = await request.close();
+      // Barrière B de l'épinglage, appliquée AVANT de détacher la socket :
+      // le client brut ne peut pas la poser lui-même, et sur une chaîne
+      // TLS valide `badCertificateCallback` n'est jamais appelé — sans
+      // cette ligne, le canal temps réel ne serait pas réellement épinglé.
+      TlsPinning.verifyPeerCertificate(response.certificate, uri.host);
       if (response.statusCode != HttpStatus.switchingProtocols) {
         final reason = response.headers.value('x-rtc-reason') ?? 'unknown';
         // Vider le corps pour libérer la connexion proprement.

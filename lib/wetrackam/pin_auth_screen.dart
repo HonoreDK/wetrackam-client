@@ -39,6 +39,10 @@ class _PinAuthScreenState extends State<PinAuthScreen> {
   final _pinController = TextEditingController();
   bool _loading = false;
   String? _error;
+  /// Vrai quand l'échec ne se réglera pas en réessayant : le téléphone
+  /// doit être réappairé. On propose alors le scan plutôt que de laisser
+  /// le chauffeur retaper son code indéfiniment.
+  bool _offerRepairing = false;
   DateTime? _lockedUntil;
   Timer? _tick;
 
@@ -108,6 +112,7 @@ class _PinAuthScreenState extends State<PinAuthScreen> {
     setState(() {
       _loading = true;
       _error = null;
+      _offerRepairing = false;
     });
     try {
       final response = await WetrackamApiClient.driverAuth(
@@ -153,16 +158,24 @@ class _PinAuthScreenState extends State<PinAuthScreen> {
         Navigator.of(context).pushReplacement(
             MaterialPageRoute(builder: (_) => const EligibilityScreen()));
       }
-    } on TlsTransportException catch (error) {
+    }
+    // ⚠️ ORDRE CRITIQUE — les blocs les plus SPÉCIFIQUES d'abord.
+    // TlsTrustException, NetworkException, SessionInvalidException et
+    // RateLimitedException héritent toutes d'ApiException : tant que
+    // `on ApiException` figurait en premier, il les interceptait toutes et
+    // leurs messages dédiés n'étaient jamais atteints. Une coupure réseau
+    // affichait donc, elle aussi, « Une erreur est survenue ».
+    on TlsTrustException catch (error) {
       _pinController.clear();
-      AppLogger.error('pin_auth_tls_${error.error}',
-          'host=${error.host} observed=${error.observedPin ?? 'unavailable'}');
-      if (mounted) setState(() => _error = ErrorCatalog.http(error: error.error));
+      AppLogger.error('pin_auth_tls_refused',
+          '${error.code} pin=${error.observedPin ?? "-"}');
+      if (mounted) {
+        setState(() {
+          _error = ErrorCatalog.tls(error.code);
+          _offerRepairing = ErrorCatalog.tlsNeedsRepairing(error.code);
+        });
+      }
     } on NetworkException {
-      // Anomalie corrigée (dead_code_on_catch_subtype) : cette clause était
-      // placée APRÈS `on ApiException`, qui l'interceptait déjà (elle en
-      // hérite) — jamais atteinte, le message réseau spécifique ne
-      // s'affichait donc jamais réellement.
       _pinController.clear();
       if (mounted) setState(() => _error = 'Connexion impossible. Vérifiez le réseau.');
     } on ApiException catch (error) {
@@ -182,12 +195,31 @@ class _PinAuthScreenState extends State<PinAuthScreen> {
         }
         _startTicking();
       } else {
-        if (mounted) setState(() => _error = ErrorCatalog.driverAuth(error.error));
+        // Le délai n'est mis en forme que s'il est réellement parlant :
+        // le serveur renvoie couramment retryAfterMs=400, et « réessayez
+        // dans 1 s » n'apporte rien au chauffeur.
+        final seconds = error.retryAfterSeconds ??
+            (error.retryAfterMs != null
+                ? (error.retryAfterMs! / 1000).ceil()
+                : null);
+        if (mounted) {
+          setState(() => _error = ErrorCatalog.driverAuth(error.error,
+              retryAfterSeconds:
+                  (seconds != null && seconds >= 2) ? seconds : null));
+        }
       }
     } catch (error) {
       _pinController.clear();
       AppLogger.error('pin_auth_unexpected', error);
-      if (mounted) setState(() => _error = 'Une erreur est survenue. Réessayez.');
+      // On nomme la nature de l'incident : un message strictement
+      // identique pour toutes les causes est précisément ce qui a rendu
+      // ce défaut indiagnosticable à distance.
+      if (mounted) {
+        setState(() => _error =
+            'Une erreur inattendue est survenue (${error.runtimeType}). '
+            'Réessayez ; si cela persiste, montrez ce message à votre '
+            'gestionnaire.');
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -289,6 +321,19 @@ class _PinAuthScreenState extends State<PinAuthScreen> {
                         child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                     : const Text('Valider'),
               ),
+              // Sortie de secours : sans elle, un téléphone dont l'ancre
+              // TLS ne correspond plus reste bloqué sur cet écran, à
+              // retaper un code qui ne pourra jamais aboutir.
+              if (_offerRepairing)
+                TextButton.icon(
+                  onPressed: _loading
+                      ? null
+                      : () => Navigator.of(context).pushReplacement(
+                          MaterialPageRoute(
+                              builder: (_) => const ProvisioningScreen())),
+                  icon: const Icon(Icons.qr_code_scanner),
+                  label: const Text('Rescanner le QR d\'appairage'),
+                ),
             ],
           ),
         ),

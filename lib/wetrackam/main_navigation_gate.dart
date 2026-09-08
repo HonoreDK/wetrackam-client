@@ -65,11 +65,11 @@ class _PingGateState extends State<_PingGate> {
     try {
       final ok = await WetrackamApiClient.pingOrThrow();
       if (mounted) setState(() => _reachable = ok);
-    } on TlsTransportException catch (error) {
+    } on TlsTrustException catch (error) {
       if (mounted) {
         setState(() {
           _reachable = false;
-          _securityError = error.error;
+          _securityError = error.code;
         });
       }
     } catch (_) {

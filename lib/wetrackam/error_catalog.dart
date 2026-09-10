@@ -90,6 +90,10 @@ class ErrorCatalog {
     // un champ `error` HTTP mais un `call.state.state` — reprise ici pour
     // que l'écran d'appel utilise la même table plutôt qu'un texte à part.
     'busy': 'Occupé. Vous pouvez lui écrire à la place.',
+    // v16 — appel coupé par la perte du chemin média (réseau du camion), pas
+    // par un raccrochage. Le distinguer évite de laisser croire que le
+    // collègue a raccroché volontairement.
+    'mediaLost': 'Connexion perdue avec votre collègue.',
 
 
     // --- 404

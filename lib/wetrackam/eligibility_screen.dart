@@ -26,6 +26,7 @@ import 'push_notifications_service.dart';
 import 'realtime_service.dart';
 import 'rtc_config_service.dart';
 import 'shift_service.dart';
+import 'sos_screen.dart';
 import 'state_sync_service.dart';
 import 'theme.dart';
 
@@ -45,6 +46,8 @@ class _EligibilityScreenState extends State<EligibilityScreen>
   Timer? _chronoTimer; // checklist B10 : chrono en direct pendant le service
   String? _selectedFreePoolDevice;
   bool _actionInProgress = false;
+  /// Alerte SOS déclenchée mais pas encore confirmée par le serveur.
+  bool _sosPending = false;
 
   StreamSubscription<void>? _reloadSub;
 
@@ -106,7 +109,15 @@ class _EligibilityScreenState extends State<EligibilityScreen>
     try {
       final data = await WetrackamApiClient.fetchEligibility();
       _loadedAt = DateTime.now();
-      unawaited(DistressService.retryPending());
+      // Rejeu d'une éventuelle alerte SOS restée en attente de réseau, PUIS
+      // relevé de l'état : tant qu'elle n'est pas confirmée, le chauffeur doit
+      // le voir — croire les secours prévenus alors qu'ils ne le sont pas est
+      // le pire état possible pour une fonction de sécurité.
+      await DistressService.retryPending();
+      final sosPending = await DistressService.hasPending();
+      if (mounted && sosPending != _sosPending) {
+        setState(() => _sosPending = sosPending);
+      }
       _ttlTimer?.cancel();
       final ttl = (data['ttlSeconds'] as num?)?.toInt() ?? 43200;
       // §6 : "après expiration de ttlSeconds" — re-fetch automatique.
@@ -338,6 +349,27 @@ class _EligibilityScreenState extends State<EligibilityScreen>
           : _error != null
               ? _networkErrorView()
               : RefreshIndicator(onRefresh: _load, child: _content()),
+      // SOS accessible EN PERMANENCE, y compris hors service et même quand le
+      // chargement de l'écran a échoué : un chauffeur en danger ne doit jamais
+      // dépendre de l'état du réseau ou d'un service ouvert pour appeler à
+      // l'aide (l'alerte part hors ligne et se rejoue toute seule).
+      floatingActionButton: _sosButton(),
+    );
+  }
+
+  Widget _sosButton() {
+    return FloatingActionButton.extended(
+      onPressed: () async {
+        await Navigator.push(
+            context, MaterialPageRoute(builder: (_) => const SosScreen()));
+        if (!mounted) return;
+        final pending = await DistressService.hasPending();
+        if (mounted) setState(() => _sosPending = pending);
+      },
+      backgroundColor: WetrackamColors.error,
+      foregroundColor: Colors.white,
+      icon: Icon(_sosPending ? Icons.cloud_off : Icons.sos),
+      label: Text(_sosPending ? 'SOS en attente' : 'SOS'),
     );
   }
 

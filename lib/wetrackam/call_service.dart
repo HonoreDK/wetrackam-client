@@ -7,12 +7,24 @@
 //     (RtcConfigService.refreshIceServersForCall(), jamais le cache du
 //     polling général — les identifiants TURN expirent en 120s).
 //  2. Trickle ICE obligatoire — chaque candidat envoyé dès sa découverte.
-//  3. Un seul appel actif — call.incoming ignoré si déjà en communication.
+//  3. Un seul appel actif — call.incoming REFUSÉ (call.decline) si déjà en
+//     communication, jamais ignoré en silence : sinon l'appelant sonne dans
+//     le vide jusqu'au délai de garde.
 //  4. Minuteur local de secours à 35s en RINGING (filet si call.ended se perd).
 //  5. Sur ENDED quel que soit le motif : audio coupé, PeerConnection
-//     fermée, tout nettoyé — jamais de micro qui reste ouvert.
+//     fermée, tout nettoyé — jamais de micro qui reste ouvert. L'état bascule
+//     AVANT la libération native, qui ne doit jamais retenir l'interface.
 //  6. restartIce() sur bascule réseau pendant CONNECTED, jamais un hangup.
+//     Émis par le seul APPELANT (évite le « glare » de double offre).
 //  7. call.stats{relayed} remonté après établissement.
+//  8. L'état réel du média fait foi autant que la signalisation : une
+//     PeerConnection qui tombe termine l'appel et prévient le pair.
+//
+// NE PAS « améliorer » _openMicrophone() en passant une Map de contraintes :
+// sur Android, `'audio': true` déclenche addDefaultAudioConstraints() (annulation
+// d'écho, réduction de bruit) ; une Map les REMPLACE et, comme la couche native
+// ne lit que `mandatory`/`optional`, des clés au format standard seraient
+// ignorées — on perdrait l'annulation d'écho sans le voir.
 import 'dart:async';
 
 import 'package:flutter_webrtc/flutter_webrtc.dart';
@@ -80,6 +92,18 @@ class CallService {
   static final List<Map<String, dynamic>> _pendingRemoteCandidates = [];
   static const _maxPendingRemoteCandidates = 60;
 
+  /// v16 — rôle dans CET appel. Seul l'appelant renégocie (redémarrage ICE) :
+  /// si les deux pairs émettent une offre en même temps sur une coupure
+  /// réseau simultanée, les deux renégociations se percutent (« glare ») et
+  /// la connexion reste cassée. Un seul émetteur d'offre, jamais deux.
+  static bool _isCaller = false;
+
+  /// v16 — fenêtre de reprise média. Un chemin ICE qui tombe (changement de
+  /// cellule, wifi -> 4G) passe par `disconnected` avant `failed` : on tente
+  /// de recoller la communication pendant ce délai au lieu de raccrocher au
+  /// premier hoquet, et on raccroche pour de bon si elle ne revient pas.
+  static Timer? _recoveryTimer;
+  static const _mediaRecoveryWindow = Duration(seconds: 10);
 
   static final _phaseController = StreamController<CallPhase>.broadcast();
   static Stream<CallPhase> get phaseChanges => _phaseController.stream;
@@ -173,6 +197,7 @@ class CallService {
     }
     _peerId = peerId;
     _peerName = peerName;
+    _isCaller = true;
     try {
       await RealtimeService.ensureConnected();
       final iceServers = await RtcConfigService.refreshIceServersForCall(); // règle 1
@@ -349,6 +374,7 @@ class CallService {
       return;
     }
     if (state == 'connected') {
+      if (!_isForCurrentCall(message)) return;
       _markConnected();
       return;
     }
@@ -359,11 +385,22 @@ class CallService {
 
   static void _onIncoming(Map<String, dynamic> message) {
     if (_phase != CallPhase.idle) {
-      // Règle 3 : le serveur envoie déjà `busy` à l'appelant dans ce cas —
-      // on ignore silencieusement ici, rien à faire côté appelé.
-      AppLogger.breadcrumb('call_incoming_ignored_busy');
+      // Règle 3 : un seul appel actif. Le serveur répond normalement `busy`
+      // à l'appelant grâce à sa propre table d'occupation — mais si cette
+      // table et l'état réel du téléphone divergent (reconnexion de socket,
+      // appel terminé côté serveur mais pas encore côté client), il ne le
+      // sait pas. CORRECTIF v16 : on refuse EXPLICITEMENT au lieu d'ignorer
+      // en silence, sinon l'appelant écoute une sonnerie dans le vide
+      // pendant tout le délai de garde (30 s) pour un téléphone qui, lui,
+      // n'a jamais sonné.
+      final otherCallId = message['callId'] as String?;
+      if (otherCallId != null) {
+        RealtimeService.send({'type': 'call.decline', 'callId': otherCallId});
+      }
+      AppLogger.breadcrumb('call_incoming_declined_busy');
       return;
     }
+    _isCaller = false;
     _callId = message['callId'] as String?;
     _peerId = message['peerId'] as int?;
     _pendingRemoteSdp = message['sdp'] as String?;
@@ -404,6 +441,7 @@ class CallService {
   static Future<void> _onAccepted(Map<String, dynamic> message) async {
     final sdp = message['sdp'] as String?;
     if (sdp == null || _pc == null) return;
+    if (!_isForCurrentCall(message)) return;
     try {
       await _pc!.setRemoteDescription(RTCSessionDescription(sdp, 'answer'));
       AppLogger.breadcrumb('call_remote_answer_set');
@@ -422,25 +460,54 @@ class CallService {
     }
   }
 
+  /// §12.6 — offre de RENÉGOCIATION reçue du pair (redémarrage ICE après un
+  /// changement de réseau, cas courant sur un camion : passage d'une cellule
+  /// à l'autre, wifi du dépôt vers la 4G).
+  ///
+  /// CORRECTIF v16 : l'ancienne version posait la description distante… et
+  /// s'arrêtait là, sans jamais produire de réponse. La renégociation restait
+  /// donc à moitié appliquée et le son ne revenait JAMAIS après une bascule
+  /// réseau — l'appel restait « en cours », mais muet. Le serveur relaie déjà
+  /// `call.answer` (relaySignal) et le pair sait le traiter : il ne manquait
+  /// que cette réponse.
   static Future<void> _onRemoteOffer(Map<String, dynamic> message) async {
-    // §12.6 : relais transparent — non utilisé dans le flux d'établissement
-    // standard (qui passe par call.invite/call.accept ci-dessus), réservé
-    // à une éventuelle re-négociation. Géré défensivement, pas testé
-    // faute de scénario connu qui l'exercerait dans ce contrat.
     final sdp = message['sdp'] as String?;
     if (sdp == null || _pc == null) return;
-    await _pc!.setRemoteDescription(RTCSessionDescription(sdp, 'offer'));
+    if (!_isForCurrentCall(message)) return;
+    try {
+      await _pc!.setRemoteDescription(RTCSessionDescription(sdp, 'offer'));
+      await _flushRemoteCandidates();
+      final answer = await _pc!.createAnswer({'offerToReceiveAudio': 1, 'offerToReceiveVideo': 0});
+      await _pc!.setLocalDescription(answer);
+      RealtimeService.send({'type': 'call.answer', 'callId': _callId, 'sdp': answer.sdp});
+      AppLogger.breadcrumb('call_renegotiation_answered');
+    } catch (error) {
+      AppLogger.error('call_renegotiation_failed', error);
+    }
   }
 
   static Future<void> _onRemoteAnswer(Map<String, dynamic> message) async {
     final sdp = message['sdp'] as String?;
     if (sdp == null || _pc == null) return;
-    await _pc!.setRemoteDescription(RTCSessionDescription(sdp, 'answer'));
+    if (!_isForCurrentCall(message)) return;
+    try {
+      await _pc!.setRemoteDescription(RTCSessionDescription(sdp, 'answer'));
+      AppLogger.breadcrumb('call_renegotiation_completed');
+    } catch (error) {
+      // Réponse arrivée hors séquence (offre déjà annulée, appel terminé
+      // entre-temps) : sans ce filet, l'exception remontait dans l'écouteur
+      // de la socket et coupait le traitement des messages suivants.
+      AppLogger.error('call_set_remote_answer_failed', error);
+    }
   }
 
   static Future<void> _onRemoteCandidate(Map<String, dynamic> message) async {
     final candidateMap = message['candidate'] as Map<String, dynamic>?;
     if (candidateMap == null) return;
+    // Un candidat destiné à l'appel précédent empoisonnerait la nouvelle
+    // négociation (chemins réseau qui n'existent plus) et retarderait
+    // d'autant l'établissement du son.
+    if (!_isForCurrentCall(message)) return;
     if (_pc == null) {
       // Sonnerie en cours : on garde le candidat pour l'appliquer dès que
       // la PeerConnection existe (voir _flushRemoteCandidates).
@@ -480,8 +547,28 @@ class CallService {
   }
 
   static void _onEnded(Map<String, dynamic> message) {
+    if (!_isForCurrentCall(message)) {
+      AppLogger.breadcrumb('call_ended_ignored_other_call');
+      return;
+    }
     AppLogger.breadcrumb('call_ended:${message['reason']}');
     _cleanup();
+  }
+
+  /// v16 — un message de signalisation ne vaut que pour l'appel EN COURS.
+  ///
+  /// Sans ce filtre, la fin de l'appel PRÉCÉDENT arrivant avec quelques
+  /// centaines de millisecondes de retard (rappel immédiat, cas très
+  /// fréquent quand on n'a pas compris son interlocuteur) raccrochait
+  /// aussitôt le nouvel appel, qui semblait « couper tout seul ».
+  ///
+  /// Tolérant tant que l'identifiant local est inconnu : côté appelant, le
+  /// callId n'arrive qu'avec `call.state{ringing}` et un refus serveur peut
+  /// le précéder — refuser ces messages-là figerait l'écran d'appel.
+  static bool _isForCurrentCall(Map<String, dynamic> message) {
+    final callId = message['callId'] as String?;
+    if (callId == null || _callId == null) return true;
+    return callId == _callId;
   }
 
   // -----------------------------------------------------------------
@@ -508,10 +595,68 @@ class CallService {
       }
       _sendLocalCandidate(candidate);
     };
-    pc.onConnectionState = (state) {
-      AppLogger.breadcrumb('call_pc_state:$state');
-    };
+    pc.onConnectionState = _onPeerConnectionState;
     return pc;
+  }
+
+  /// v16 — l'état RÉEL du média fait foi, au même titre que la signalisation.
+  ///
+  /// Auparavant cet état était seulement journalisé. Or `call.ended` n'arrive
+  /// pas toujours : application du pair tuée par le système, batterie vide,
+  /// tunnel sans réseau, socket de signalisation coupée du côté qui écoute.
+  /// L'appel restait alors « en cours » à l'écran, chronomètre qui défile et
+  /// micro ouvert, pour une communication morte depuis longtemps. La couche
+  /// WebRTC, elle, le sait en quelques secondes : on s'en sert.
+  static void _onPeerConnectionState(RTCPeerConnectionState state) {
+    AppLogger.breadcrumb('call_pc_state:$state');
+    switch (state) {
+      case RTCPeerConnectionState.RTCPeerConnectionStateConnected:
+        // Chemin média rétabli : la fenêtre de reprise n'a plus lieu d'être.
+        _recoveryTimer?.cancel();
+        _recoveryTimer = null;
+      case RTCPeerConnectionState.RTCPeerConnectionStateDisconnected:
+        // Coupure possiblement passagère (changement de cellule) : on tente
+        // de recoller avant d'abandonner, comme le fait une application
+        // grand public — jamais un raccrochage au premier hoquet.
+        _beginMediaRecovery();
+      case RTCPeerConnectionState.RTCPeerConnectionStateFailed:
+        // ICE a épuisé ses candidats : plus aucun espoir sur cette session.
+        unawaited(_endBrokenCall('mediaLost'));
+      case RTCPeerConnectionState.RTCPeerConnectionStateClosed:
+        break; // fermeture volontaire : _cleanup() est déjà passé par là.
+      default:
+        break;
+    }
+  }
+
+  static void _beginMediaRecovery() {
+    if (_phase != CallPhase.connected || _recoveryTimer != null) return;
+    AppLogger.breadcrumb('call_media_recovery_started');
+    // Redémarrage ICE immédiat (no-op côté appelé : un seul pair renégocie).
+    unawaited(restartIceOnNetworkChange());
+    _recoveryTimer = Timer(_mediaRecoveryWindow, () {
+      _recoveryTimer = null;
+      if (_phase != CallPhase.connected) return;
+      if (_pc?.connectionState ==
+          RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+        AppLogger.breadcrumb('call_media_recovered');
+        return;
+      }
+      unawaited(_endBrokenCall('mediaLost'));
+    });
+  }
+
+  /// Fin d'appel décidée par le média, pas par la signalisation. On prévient
+  /// le serveur (donc le pair) : sans ce `call.hangup`, l'autre téléphone
+  /// resterait de son côté sur un appel fantôme jusqu'à sa propre détection.
+  static Future<void> _endBrokenCall(String reason) async {
+    if (_phase != CallPhase.connected && _phase != CallPhase.outgoingRinging) return;
+    AppLogger.breadcrumb('call_media_broken:$reason');
+    _lastErrorReason = reason;
+    if (_callId != null) {
+      RealtimeService.send({'type': 'call.hangup', 'callId': _callId});
+    }
+    await _cleanup();
   }
 
   static void _sendLocalCandidate(RTCIceCandidate candidate) {
@@ -546,6 +691,12 @@ class CallService {
   /// 1,2 s). No-op hors appel connecté, donc sans risque d'effet de bord.
   static Future<void> restartIceOnNetworkChange() async {
     if (_phase != CallPhase.connected || _pc == null) return;
+    // v16 — un SEUL pair émet l'offre de renégociation. Les deux téléphones
+    // observent la même coupure au même instant (c'est le chemin entre eux
+    // qui tombe) : sans ce garde-fou, les deux envoyaient une offre en même
+    // temps et les renégociations se percutaient, laissant l'appel
+    // définitivement muet là où il aurait dû se rétablir.
+    if (!_isCaller) return;
     try {
       final offer = await _pc!.createOffer({'iceRestart': true});
       await _pc!.setLocalDescription(offer);
@@ -661,6 +812,8 @@ class CallService {
   static Future<void> _cleanup() async {
     _ringingSafetyTimer?.cancel();
     _ringingSafetyTimer = null;
+    _recoveryTimer?.cancel();
+    _recoveryTimer = null;
     _statsTimer?.cancel();
     _statsTimer = null;
     _statsReported = false;
@@ -673,19 +826,22 @@ class CallService {
     // nulle part ailleurs. Une notification d'appel orpheline qui survit au
     // raccrochage est le défaut le plus visible d'une intégration VoIP.
     unawaited(CallUiService.hide(_callId));
-    try {
-      for (final track in _localStream?.getTracks() ?? <MediaStreamTrack>[]) {
-        await track.stop();
-      }
-      await _localStream?.dispose();
-    } catch (error) {
-      AppLogger.error('call_cleanup_stream_failed', error);
-    }
-    try {
-      await _pc?.close();
-    } catch (error) {
-      AppLogger.error('call_cleanup_pc_failed', error);
-    }
+
+    // v16 — L'ÉTAT BASCULE D'ABORD, la libération native vient APRÈS.
+    //
+    // L'ordre inverse (attendre track.stop(), stream.dispose() puis
+    // pc.close() avant d'annoncer la fin) faisait dépendre l'écran d'appel
+    // de trois allers-retours vers le code natif : au mieux un raccrochage
+    // qui traîne une seconde, au pire — appel de plateforme qui ne rend
+    // jamais la main sur une PeerConnection dont l'ICE s'agite encore — un
+    // écran « appel en cours » qui ne se fermait PLUS JAMAIS alors que le
+    // pair avait raccroché depuis longtemps. C'est le défaut n°1 signalé.
+    //
+    // La règle 5 (jamais de micro qui reste ouvert) est conservée : les
+    // références sont capturées ici et leur libération est lancée juste
+    // en dessous — elle ne peut simplement plus retenir l'interface.
+    final stream = _localStream;
+    final pc = _pc;
     _localStream = null;
     _pc = null;
     _callId = null;
@@ -693,11 +849,33 @@ class CallService {
     _peerName = null;
     _pendingRemoteSdp = null;
     _connectedAt = null;
+    _isCaller = false;
     _setPhase(CallPhase.ended);
     // Repasse à idle juste après avoir notifié `ended` — laisse une frame
     // à l'écran d'appel pour réagir (fermeture) avant que idle ne masque
     // silencieusement l'état sans qu'aucun écran n'ait eu la transition.
     Future.microtask(() => _setPhase(CallPhase.idle));
+
+    await _releaseMedia(stream, pc);
+  }
+
+  /// Libération des ressources natives, volontairement découplée de la
+  /// machine à états (voir _cleanup). Aucune exception ne remonte : à ce
+  /// stade l'appel est déjà terminé du point de vue de l'utilisateur.
+  static Future<void> _releaseMedia(MediaStream? stream, RTCPeerConnection? pc) async {
+    try {
+      for (final track in stream?.getTracks() ?? <MediaStreamTrack>[]) {
+        await track.stop();
+      }
+      await stream?.dispose();
+    } catch (error) {
+      AppLogger.error('call_cleanup_stream_failed', error);
+    }
+    try {
+      await pc?.close();
+    } catch (error) {
+      AppLogger.error('call_cleanup_pc_failed', error);
+    }
   }
 
   static void dispose() {

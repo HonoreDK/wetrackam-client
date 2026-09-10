@@ -254,6 +254,15 @@ class VoiceNoteService {
       );
       if (putResponse.statusCode < 200 || putResponse.statusCode >= 300) {
         AppLogger.error('voice_upload_put_failed', putResponse.statusCode);
+        // Un REFUS du stockage (401/403 : signature invalide, droits, URL
+        // expirée) n'est pas une coupure réseau : le rejouer produira
+        // exactement le même refus, et annoncer « la note partira au retour
+        // du signal » serait un mensonge. On le remonte tel quel — c'est
+        // précisément ce qui a masqué le bug de signature /media (l'URL
+        // signée incluait le préfixe retiré par le proxy).
+        if (putResponse.statusCode == 401 || putResponse.statusCode == 403) {
+          throw const VoiceNoteException('mediaStorageRejected');
+        }
         throw const VoiceNoteException('mediaStorageUnavailable');
       }
 

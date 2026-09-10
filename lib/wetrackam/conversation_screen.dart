@@ -234,6 +234,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
           'mediaMissingLocalFile': 'Enregistrement introuvable, réessayez.',
           'mediaStorageUnavailable':
               'Réseau indisponible : la note partira automatiquement au retour du signal.',
+          'mediaStorageRejected':
+              'Le stockage a refusé la note vocale. Prévenez votre gestionnaire.',
         };
         final msg = labels[error.reason] ?? 'Envoi impossible.';
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));

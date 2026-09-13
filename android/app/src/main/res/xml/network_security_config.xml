@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  v13 — DURCISSEMENT TLS.
+
+  Avant : cleartextTrafficPermitted="true" globalement ET confiance aux
+  certificats installes par l'utilisateur. Autrement dit, n'importe quel
+  proxy installe sur le telephone (ou pousse par un MDM tiers) pouvait lire
+  et modifier les positions, les messages et la signalisation d'appel en
+  clair. Inacceptable pour une flotte.
+
+  Apres : TLS obligatoire vers l'exterieur, aucune confiance aux certificats
+  utilisateur, cleartext tolere UNIQUEMENT vers les adresses de boucle et de
+  reseau local, qui servent aux demonstrations MODE=local sans domaine.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">10.0.2.2</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>

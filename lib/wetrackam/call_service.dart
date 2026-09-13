@@ -235,9 +235,21 @@ class CallService {
     }
   }
 
+  /// Anomalie corrigée : `acceptCall()` étant `async`, deux déclencheurs
+  /// concurrents (écran d'appel natif ET écran in-app, ou double appui) qui
+  /// invoquaient la fonction avant que le premier appel n'ait eu le temps de
+  /// faire basculer `_phase` passaient TOUS LES DEUX le test ci-dessous —
+  /// reproduit en direct sur téléphone (`call_accepted` répété, puis
+  /// WEBRTC_CREATE_ANSWER_ERROR sur une PeerConnection déjà répondue). Ce
+  /// drapeau, positionné de façon SYNCHRONE avant tout `await`, ferme cette
+  /// fenêtre de course.
+  static bool _accepting = false;
+
   static Future<void> acceptCall() async {
     final remoteSdp = _pendingRemoteSdp;
     if (_phase != CallPhase.incomingRinging || remoteSdp == null || _callId == null) return;
+    if (_accepting) return;
+    _accepting = true;
     try {
       final iceServers = await RtcConfigService.refreshIceServersForCall(); // règle 1
       _pc = await _buildPeerConnection(iceServers);
@@ -810,6 +822,7 @@ class CallService {
   /// motif : coupe l'audio, ferme la PeerConnection, remet l'état à idle.
   /// Ne doit JAMAIS pouvoir laisser un micro ouvert.
   static Future<void> _cleanup() async {
+    _accepting = false;
     _ringingSafetyTimer?.cancel();
     _ringingSafetyTimer = null;
     _recoveryTimer?.cancel();

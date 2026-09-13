@@ -7,17 +7,38 @@
 // « la VoIP ne fonctionne pas » — elle fonctionnait, mais personne ne voyait
 // jamais l'appel sonner téléphone en poche.
 //
-// Ce service encapsule TOUT le natif d'appel, et rien d'autre :
-//   - Android : notification plein écran (full-screen intent) qui réveille
-//     l'écran verrouillé, plus un service de premier plan de type
-//     `microphone` pendant la communication (obligatoire depuis Android 14 :
-//     sans lui, le système coupe l'accès micro d'une app en arrière-plan et
-//     l'appel devient muet au bout de quelques secondes).
-//   - iOS : CallKit (écran d'appel système). ⚠️ Le socle est ici complet et
-//     configuré, mais la chaîne PushKit/VoIP iOS exige un certificat VoIP
-//     Apple et une compilation sur Mac — voir BUILD-IOS.md. Sur iOS, tant que
-//     PushKit n'est pas activé côté serveur, l'appel entrant s'affiche
-//     lorsque l'application est au premier plan ou en arrière-plan récent.
+// v17 — UNE SEULE SURFACE À LA FOIS, ET ELLE OBÉIT.
+//
+// Ce que la v13 faisait de travers, reproduit sur téléphone :
+//  - la notification native d'appel entrant était affichée EN PLUS de la page
+//    Flutter (deux surfaces qui sonnent) ;
+//  - après un décrochage sur la page Flutter, cette notification survivait
+//    (seul le son était coupé), restait « en haut », puis EXPIRAIT — et son
+//    expiration était traitée comme un refus : l'appel décroché se
+//    raccrochait tout seul au bout de 20 s, avec une notification « appel
+//    manqué » en prime ;
+//  - `setCallConnected` ajoutait une TROISIÈME notification (« appel en cours »
+//    du plugin) à côté de celle du service de premier plan.
+//
+// Règles v17, toutes appliquées ici :
+//  1. Android AU PREMIER PLAN : la page Flutter est la seule surface d'appel
+//     entrant ; elle sonne via CallRinger (natif, canal wetrackam/call_fgs).
+//     Aucune notification native n'est affichée.
+//  2. Android EN ARRIÈRE-PLAN / écran verrouillé / application tuée : la
+//     notification plein écran du plugin est la seule surface (c'est le seul
+//     moyen de réveiller l'écran). Elle est FERMÉE dès que l'appel est
+//     accepté, refusé, terminé ou manqué — par `dismissIncoming`, jamais par
+//     son propre délai.
+//  3. iOS : CallKit toujours (c'est l'interface d'appel du système).
+//  4. Pendant la communication, UNE notification : celle du service de
+//     premier plan « microphone » (obligatoire Android 14+), avec le nom du
+//     collègue. Le plugin n'affiche pas la sienne (`callingNotification`
+//     désactivée).
+//  5. `activeCalls()` du plugin est la SEULE source de vérité inter-isolates :
+//     le push (isolate d'arrière-plan) et la socket (isolate principal) ne
+//     partagent aucune variable Dart. Une notification déjà affichée par le
+//     push n'est jamais réaffichée par la socket — c'est ce doublon qui
+//     relançait la sonnerie en pleine communication.
 //
 // Invariant : ce fichier ne connaît RIEN de WebRTC ni du protocole. Il ne
 // décide jamais d'accepter ou de refuser : il remonte l'intention de
@@ -49,27 +70,24 @@ typedef CallUiIntent = void Function(String callId);
 class CallUiService {
   CallUiService._();
 
-  static const _fgsChannel = MethodChannel('wetrackam/call_fgs');
+  static const _channel = MethodChannel('wetrackam/call_fgs');
 
   static StreamSubscription<CallEvent?>? _sub;
   static CallUiIntent? _onAccept;
   static CallUiIntent? _onDecline;
   static CallUiIntent? _onEnd;
-
-  /// Identifiant affiché par l'écran natif. Tant que le `callId` réel n'est
-  /// pas connu (push reçu AVANT `call.incoming` sur la socket), on utilise
-  /// l'identifiant du push, puis on réconcilie via [rebind].
-  static String? _shownCallId;
-  static String? get shownCallId => _shownCallId;
+  static CallUiIntent? _onTimeout;
 
   static Future<void> init({
     required CallUiIntent onAccept,
     required CallUiIntent onDecline,
     required CallUiIntent onEnd,
+    required CallUiIntent onTimeout,
   }) async {
     _onAccept = onAccept;
     _onDecline = onDecline;
     _onEnd = onEnd;
+    _onTimeout = onTimeout;
     if (_sub != null) return;
     _sub = FlutterCallkitIncoming.onEvent.listen(_onEvent);
     try {
@@ -80,128 +98,188 @@ class CallUiService {
     AppLogger.breadcrumb('call_ui_init');
   }
 
+  /// Les événements natifs sont TOUS relayés avec leur `callId` : c'est
+  /// CallService (call_policy.decideNativeEvent) qui décide s'ils concernent
+  /// l'appel en cours et dans quelle phase ils ont un sens. Ici, aucune
+  /// interprétation.
   static void _onEvent(CallEvent? event) {
     if (event == null) return;
     switch (event) {
       case CallEventActionCallAccept(:final callKitParams):
-        final id = callKitParams.id;
-        _shownCallId = id;
         AppLogger.breadcrumb('call_ui_accept');
-        _onAccept?.call(id);
+        _onAccept?.call(callKitParams.id);
       case CallEventActionCallDecline(:final callKitParams):
         AppLogger.breadcrumb('call_ui_decline');
         _onDecline?.call(callKitParams.id);
-        _shownCallId = null;
       case CallEventActionCallEnded(:final callKitParams):
         AppLogger.breadcrumb('call_ui_ended');
         _onEnd?.call(callKitParams.id);
-        _shownCallId = null;
       case CallEventActionCallTimeout(:final id):
-        // Anomalie corrigée : contrairement aux autres cas de ce switch,
-        // CallEventActionCallTimeout expose un champ `id` (String) direct,
-        // pas `callKitParams` — cette erreur de compilation empêchait
-        // l'app entière de builder (undefined_getter).
-        // Sonnerie non décrochée : traité EXACTEMENT comme un refus côté
-        // protocole (le serveur, lui, a son propre minuteur de 30 s) —
-        // surtout pas comme un silence, sinon l'appelant resterait pendu.
         AppLogger.breadcrumb('call_ui_timeout');
-        _onDecline?.call(id);
-        _shownCallId = null;
+        _onTimeout?.call(id);
       default:
         break;
     }
   }
 
   // -----------------------------------------------------------------
-  // Affichage
+  // Appel entrant — surface native (arrière-plan Android, iOS)
   // -----------------------------------------------------------------
 
-  /// Affiche l'écran d'appel entrant natif. Idempotent : rappeler avec le
-  /// même `callId` ne crée pas une seconde sonnerie.
-  static Future<void> showIncoming({
+  /// Affiche l'écran d'appel entrant natif. Idempotent ENTRE ISOLATES : si le
+  /// plugin connaît déjà cet appel (affiché par le push dans l'isolate
+  /// d'arrière-plan), rien n'est réaffiché — réafficher relançait la
+  /// sonnerie, y compris après un décrochage.
+  static Future<void> showNativeIncoming({
     required String callId,
     required String callerName,
     int ringTimeoutSeconds = 30,
   }) async {
-    if (_shownCallId == callId) return;
-    // Un seul appel visible à la fois — sinon deux sonneries superposées
-    // après un push suivi du `call.incoming` socket sur un callId différent.
-    if (_shownCallId != null) await hide(_shownCallId!);
-    _shownCallId = callId;
     try {
+      if (await _knownByPlugin(callId)) {
+        AppLogger.breadcrumb('call_ui_incoming_already_shown');
+        return;
+      }
       await FlutterCallkitIncoming.showCallkitIncoming(
         _params(callId: callId, callerName: callerName, ringTimeoutSeconds: ringTimeoutSeconds),
       );
       AppLogger.breadcrumb('call_ui_incoming_shown');
     } catch (error) {
       AppLogger.error('call_ui_show_failed', error);
-      _shownCallId = null;
     }
   }
 
-  /// Le push arrive avant la socket : l'écran natif a été affiché avec le
-  /// `callId` du push. Si le `call.incoming` reçu ensuite porte un autre
-  /// identifiant (cas d'un push perdu puis d'un nouvel appel), on remplace
-  /// l'écran plutôt que de laisser deux appels divergents.
-  static Future<void> rebind({
-    required String realCallId,
-    required String callerName,
-    required int ringTimeoutSeconds,
-  }) async {
-    if (_shownCallId == realCallId) return;
-    await showIncoming(
-      callId: realCallId,
-      callerName: callerName,
-      ringTimeoutSeconds: ringTimeoutSeconds,
-    );
-  }
-
-  /// Passage en communication : bascule l'écran natif en « appel en cours »
-  /// et démarre le service de premier plan micro (Android).
-  static Future<void> setConnected(String callId) async {
+  /// Ferme l'écran d'appel entrant natif (sonnerie, vibration, notification
+  /// et son minuteur d'expiration). À appeler dès que l'appel n'est plus « en
+  /// train de sonner » : accepté, refusé, manqué, annulé par l'appelant.
+  /// Idempotent, jamais bloquant.
+  static Future<void> dismissIncoming(String callId) async {
     try {
-      await FlutterCallkitIncoming.setCallConnected(callId);
+      await FlutterCallkitIncoming.hideCallkitIncoming(
+        _params(callId: callId, callerName: '', ringTimeoutSeconds: 30),
+      );
     } catch (error) {
-      AppLogger.error('call_ui_connected_failed', error);
+      AppLogger.error('call_ui_dismiss_failed', error);
     }
-    await startMicService();
   }
 
-  /// Appel sortant : l'écran natif sert ici à tenir le service de premier
-  /// plan et à afficher l'appel dans l'historique système (iOS).
-  static Future<void> showOutgoing({
-    required String callId,
-    required String peerName,
-  }) async {
-    _shownCallId = callId;
+  // -----------------------------------------------------------------
+  // Appel entrant — sonnerie applicative (Android au premier plan)
+  // -----------------------------------------------------------------
+
+  static bool _ringing = false;
+
+  static Future<void> ringInApp() async {
+    if (!Platform.isAndroid) return;
+    _ringing = true;
     try {
-      await FlutterCallkitIncoming.startCall(_params(
-        callId: callId,
-        callerName: peerName,
-        ringTimeoutSeconds: 30,
-      ));
+      await _channel.invokeMethod<void>('ringStart');
     } catch (error) {
-      AppLogger.error('call_ui_outgoing_failed', error);
+      AppLogger.error('call_ring_start_failed', error);
     }
-    await startMicService();
   }
+
+  static Future<void> stopInAppRing() async {
+    if (!Platform.isAndroid || !_ringing) return;
+    _ringing = false;
+    try {
+      await _channel.invokeMethod<void>('ringStop');
+    } catch (error) {
+      AppLogger.error('call_ring_stop_failed', error);
+    }
+  }
+
+  // -----------------------------------------------------------------
+  // Communication établie
+  // -----------------------------------------------------------------
+
+  /// Passage en communication. iOS : CallKit est informé (chronomètre
+  /// système, journal). Android : le service de premier plan micro devient
+  /// l'unique notification, avec le nom du collègue.
+  static Future<void> markConnected({required String callId, required String peerName}) async {
+    await stopInAppRing();
+    if (Platform.isIOS) {
+      try {
+        await FlutterCallkitIncoming.setCallConnected(callId);
+      } catch (error) {
+        AppLogger.error('call_ui_connected_failed', error);
+      }
+    }
+    await startMicService(peerName: peerName);
+  }
+
+  /// Appel sortant sur iOS : CallKit doit connaître l'appel pour que l'audio
+  /// survive au verrouillage et que le système affiche l'appel en cours.
+  /// Android : rien à afficher avant la connexion (l'écran Flutter suffit),
+  /// le service micro démarre dès l'émission (le micro est déjà ouvert).
+  static Future<void> markOutgoing({required String callId, required String peerName}) async {
+    if (Platform.isIOS) {
+      try {
+        await FlutterCallkitIncoming.startCall(
+          _params(callId: callId, callerName: peerName, ringTimeoutSeconds: 30),
+        );
+      } catch (error) {
+        AppLogger.error('call_ui_outgoing_failed', error);
+      }
+    }
+    await startMicService(peerName: peerName);
+  }
+
+  // -----------------------------------------------------------------
+  // Fin d'appel
+  // -----------------------------------------------------------------
 
   /// Fin d'appel, quel que soit le motif. TOUJOURS appelé depuis le point de
   /// nettoyage unique de CallService — jamais ailleurs, sinon l'écran natif
-  /// et l'état applicatif pourraient diverger.
-  static Future<void> hide(String? callId) async {
+  /// et l'état applicatif pourraient diverger. Ferme TOUT : sonnerie
+  /// applicative, écran natif (entrant ou en cours), service de premier plan.
+  static Future<void> endAll(String? callId) async {
+    await stopInAppRing();
     await stopMicService();
     try {
       if (callId != null) {
+        await dismissIncoming(callId);
         await FlutterCallkitIncoming.endCall(callId);
       }
       // Filet : un écran orphelin (push affiché puis appel annulé avant la
-      // socket) ne doit jamais rester à sonner sur le téléphone.
-      await FlutterCallkitIncoming.endAllCalls();
+      // socket, appel d'une session précédente) ne doit jamais rester à
+      // sonner. On ne touche au plugin que s'il a encore quelque chose.
+      final calls = await FlutterCallkitIncoming.activeCalls();
+      if (calls.isNotEmpty) {
+        await FlutterCallkitIncoming.endAllCalls();
+      }
     } catch (error) {
-      AppLogger.error('call_ui_hide_failed', error);
+      AppLogger.error('call_ui_end_failed', error);
     }
-    _shownCallId = null;
+  }
+
+  /// v17 — fin d'un appel qui sonnait PAR PUSH (l'appelant a raccroché avant
+  /// le décrochage, ou le serveur a clos la sonnerie), reçue par push
+  /// `call_ended` : l'écran natif est fermé tout de suite au lieu de sonner
+  /// jusqu'à son propre délai, et « appel manqué » est affiché. Utilisable
+  /// depuis l'isolate d'arrière-plan (aucun état Dart requis).
+  static Future<void> endFromPush({
+    required String callId,
+    required String reason,
+    required String callerName,
+  }) async {
+    try {
+      if (!await _knownByPlugin(callId)) {
+        // Déjà fermé (délai natif écoulé, appel décroché entre-temps) :
+        // rien à faire, et surtout pas un second « appel manqué ».
+        return;
+      }
+      await dismissIncoming(callId);
+      await FlutterCallkitIncoming.endCall(callId);
+      if (reason == 'cancelled' || reason == 'timeout') {
+        await FlutterCallkitIncoming.showMissCallNotification(
+          _params(callId: callId, callerName: callerName, ringTimeoutSeconds: 30),
+        );
+      }
+      AppLogger.breadcrumb('call_ui_ended_from_push:$reason');
+    } catch (error) {
+      AppLogger.error('call_ui_end_from_push_failed', error);
+    }
   }
 
   /// Au démarrage : l'utilisateur a-t-il accepté un appel alors que
@@ -210,16 +288,21 @@ class CallUiService {
     try {
       final calls = await FlutterCallkitIncoming.activeCalls();
       for (final call in calls) {
-        if (call.isAccepted) {
-          _shownCallId = call.id;
+        final id = call.id;
+        if (call.isAccepted && id.isNotEmpty) {
           AppLogger.breadcrumb('call_ui_external_acceptance');
-          return call.id;
+          return id;
         }
       }
     } catch (error) {
       AppLogger.error('call_ui_active_calls_failed', error);
     }
     return null;
+  }
+
+  static Future<bool> _knownByPlugin(String callId) async {
+    final calls = await FlutterCallkitIncoming.activeCalls();
+    return calls.any((call) => call.id == callId);
   }
 
   static CallKitParams _params({
@@ -239,9 +322,13 @@ class CallUiService {
         isShowCallback: false,
         subtitle: 'Appel manqué',
       ),
-      // Anomalie corrigée (erreur de compilation) : `textAccept`/
-      // `textDecline` n'existent plus au niveau racine de CallKitParams
-      // dans flutter_callkit_incoming 3.1.5 — déplacés dans AndroidParams.
+      // v17 : le plugin n'affiche PAS sa notification « appel en cours ».
+      // Le service de premier plan micro (CallForegroundService) est la
+      // seule notification pendant la communication.
+      callingNotification: const NotificationParams(
+        showNotification: false,
+        isShowCallback: false,
+      ),
       android: const AndroidParams(
         isCustomNotification: true,
         isShowLogo: false,
@@ -278,10 +365,10 @@ class CallUiService {
   // -----------------------------------------------------------------
   static bool _fgsRunning = false;
 
-  static Future<void> startMicService() async {
+  static Future<void> startMicService({String? peerName}) async {
     if (!Platform.isAndroid || _fgsRunning) return;
     try {
-      await _fgsChannel.invokeMethod<void>('start');
+      await _channel.invokeMethod<void>('start', {'peer': peerName ?? 'Appel en cours'});
       _fgsRunning = true;
       AppLogger.breadcrumb('call_fgs_start');
     } catch (error) {
@@ -292,7 +379,7 @@ class CallUiService {
   static Future<void> stopMicService() async {
     if (!Platform.isAndroid || !_fgsRunning) return;
     try {
-      await _fgsChannel.invokeMethod<void>('stop');
+      await _channel.invokeMethod<void>('stop');
     } catch (error) {
       AppLogger.error('call_fgs_stop_failed', error);
     }

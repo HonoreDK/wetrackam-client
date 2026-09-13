@@ -38,6 +38,7 @@ import 'package:uuid/uuid.dart';
 
 import 'api_client.dart';
 import 'app_logger.dart';
+import 'call_service.dart';
 import 'call_ui_service.dart';
 import 'peer_name_cache.dart';
 import 'driver_identity_service.dart';
@@ -69,7 +70,7 @@ const _kChannels = [
 /// de contrôle — pas un type "métier" au sens du catalogue d'origine,
 /// mais doit être routé, pas ignoré comme un type inconnu).
 const _kKnownTypes = {
-  'call', 'message', 'missed_call',
+  'call', 'call_ended', 'message', 'missed_call',
   'fatigue', 'fatigue_warning', 'speeding', 'eco_driving', 'speed_jump',
   'fuel_theft', 'fuel_leak', 'fuel_glitch', 'night_driving',
   'license_expired', 'idle_engine', 'out_of_bounds',
@@ -103,10 +104,28 @@ Future<void> _firebaseBackgroundHandler(RemoteMessage message) async {
     }
     final callerId = int.tryParse('${message.data['callerId'] ?? ''}') ?? 0;
     final timeout = int.tryParse('${message.data['ringTimeoutSeconds'] ?? ''}') ?? 30;
-    await CallUiService.showIncoming(
+    // Idempotent entre isolates (activeCalls du plugin) : si l'application
+    // principale a déjà affiché cet appel via la socket, rien n'est
+    // réaffiché — un second affichage relançait la sonnerie.
+    await CallUiService.showNativeIncoming(
       callId: callId,
       callerName: await PeerNameCache.displayName(callerId),
       ringTimeoutSeconds: timeout,
+    );
+    return;
+  }
+
+  // v17 — l'appel qui sonnait par push n'existe plus : on ferme l'écran
+  // natif tout de suite (l'appelant a raccroché, ou le serveur a clos la
+  // sonnerie) au lieu de laisser le téléphone sonner jusqu'à son délai.
+  if (message.data['type'] == 'call_ended') {
+    final callId = message.data['callId'] as String?;
+    if (callId == null || callId.isEmpty) return;
+    final callerId = int.tryParse('${message.data['callerId'] ?? ''}') ?? 0;
+    await CallUiService.endFromPush(
+      callId: callId,
+      reason: '${message.data['reason'] ?? ''}',
+      callerName: await PeerNameCache.displayName(callerId),
     );
     return;
   }
@@ -498,8 +517,19 @@ class PushNotificationsService {
       // rétablit d'abord. L'écran d'appel Flutter (CallNavigator) prendra le
       // relais sur `call.incoming` — pas d'écran natif ici, il ferait double
       // sonnerie avec l'écran applicatif déjà visible.
-      RealtimeService.ensureConnected();
+      RealtimeService.ensureConnected().catchError((_) {});
       AppLogger.breadcrumb('push_call_incoming_connecting');
+      return;
+    }
+
+    if (type == 'call_ended') {
+      // Application vivante : la machine à états décide (même appel en
+      // sonnerie → fin propre + « appel manqué » ; sinon simple fermeture
+      // d'une surface native orpheline).
+      final callId = data['callId'] as String?;
+      if (callId != null && callId.isNotEmpty) {
+        CallService.onCallEndedFromPush(callId: callId, reason: '${data['reason'] ?? ''}');
+      }
       return;
     }
 

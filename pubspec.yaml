@@ -1,7 +1,7 @@
 name: wetrackam_client
 description: "Application chauffeur WeTrackam"
 publish_to: 'none'
-version: 17.0.0+170
+version: 17.1.0+171
 
 environment:
   sdk: ^3.7.2
@@ -56,6 +56,11 @@ dependencies:
   # v13 — appel entrant application en arrière-plan OU tuée : écran d'appel
   # plein écran natif (CallKit sur iOS, notification full-screen sur Android).
   flutter_callkit_incoming: ^3.1.5
+  # v17 — Wetro, l'assistant vocal du chauffeur : dictée du téléphone (mot
+  # d'éveil « Wetro », commandes) et synthèse vocale (réponses lues). Mêmes
+  # versions que l'application manager : un seul comportement à recetter.
+  speech_to_text: ^7.4.0
+  flutter_tts: ^4.2.5
 
 
 dev_dependencies:

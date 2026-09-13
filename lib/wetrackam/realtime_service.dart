@@ -16,6 +16,7 @@ import 'dart:math';
 
 import 'app_logger.dart';
 import 'api_client.dart';
+import 'call_policy.dart' show CallSignalQueue;
 import 'discovery_service.dart';
 import 'driver_identity_service.dart';
 import 'state_sync_service.dart';
@@ -69,6 +70,19 @@ class RealtimeService {
   static Stream<RealtimeState> get stateChanges => _stateController.stream;
   static RealtimeState get state => _state;
 
+  /// v17 — émis à chaque `ready` du serveur, APRÈS le rejeu des signaux
+  /// d'appel en attente. CallService s'en sert pour envoyer `call.resume` :
+  /// une socket qui se rouvre pendant un appel doit immédiatement savoir si
+  /// cet appel existe encore.
+  static final _readyController = StreamController<void>.broadcast();
+  static Stream<void> get readyEvents => _readyController.stream;
+
+  /// v17 — signaux d'appel (`call.*`) émis pendant une coupure de socket.
+  /// Avant : jetés en silence, et un `call.hangup` perdu laissait le pair
+  /// « en appel » à nous écouter. Maintenant : rejoués dans l'ordre dès
+  /// `ready`, bornés en nombre et en âge (voir CallSignalQueue).
+  static final _callSignals = CallSignalQueue();
+
   static List<String> _capabilities = const [];
   static bool get canChat => _capabilities.contains('chat');
   static bool get canCall => _capabilities.contains('call');
@@ -100,7 +114,10 @@ class RealtimeService {
   /// §3 PROMPT-MOBILE-HONORE : fermer durablement en arrière-plan, le push
   /// prend le relais pour les appels/messages.
   static Future<void> disconnect({bool userIntent = true}) async {
-    if (userIntent) _wantConnected = false;
+    if (userIntent) {
+      _wantConnected = false;
+      _callSignals.clear();
+    }
     _reconnectTimer?.cancel();
     await _socketSub?.cancel();
     await _socket?.close();
@@ -259,6 +276,17 @@ class RealtimeService {
       }
       AppLogger.breadcrumb('realtime_ready');
       _capabilities = (message['capabilities'] as List?)?.cast<String>() ?? _capabilities;
+      // Rejeu des signaux d'appel en attente, PUIS annonce du `ready` : un
+      // raccrochage en file doit partir avant qu'un `call.resume` ne
+      // demande l'état d'un appel que l'on vient de clore.
+      final pending = _callSignals.drain();
+      for (final pendingMessage in pending) {
+        _socket?.add(jsonEncode(pendingMessage));
+      }
+      if (pending.isNotEmpty) {
+        AppLogger.breadcrumb('realtime_call_signals_replayed:${pending.length}');
+      }
+      _readyController.add(null);
       return;
     }
     if (type == 'ping') {
@@ -356,6 +384,17 @@ class RealtimeService {
   /// ligne — voir chat_service.dart).
   static void send(Map<String, dynamic> message) {
     if (_socket == null || _state != RealtimeState.connected) {
+      if (CallSignalQueue.isCallSignal(message)) {
+        // Un signal d'appel attend la reconnexion (voir _onData `ready`).
+        _callSignals.enqueue(message);
+        AppLogger.breadcrumb('realtime_call_signal_queued:${message['type']}');
+        if (_wantConnected && _state == RealtimeState.idle) {
+          // La socket a été fermée volontairement (arrière-plan) alors qu'un
+          // appel la réclame : on la rouvre, sans attendre un écran.
+          unawaited(ensureConnected().catchError((_) {}));
+        }
+        return;
+      }
       AppLogger.breadcrumb('realtime_send_dropped_not_connected:${message['type']}');
       return;
     }

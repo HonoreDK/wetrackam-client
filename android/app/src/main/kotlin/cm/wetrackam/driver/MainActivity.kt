@@ -8,12 +8,19 @@ import io.flutter.plugin.common.MethodChannel
 
 /**
  * v13 — pont minimal entre la machine à états d'appel (Dart, source de
- * vérité unique) et le service de premier plan « microphone » exigé par
- * Android 14+ pendant un appel WebRTC.
+ * vérité unique) et le natif Android exigé par un appel WebRTC :
+ *   - `start` / `stop`     : service de premier plan « microphone »
+ *                            (obligatoire depuis Android 14 pour capturer
+ *                            hors premier plan) ;
+ *   - `ringStart`/`ringStop` (v17) : sonnerie + vibration de l'appel entrant
+ *                            quand l'application est AU PREMIER PLAN — la
+ *                            page Flutter d'appel entrant est alors la seule
+ *                            surface, elle ne sait pas sonner toute seule.
  *
- * Deux méthodes seulement, volontairement : `start` et `stop`. Toute logique
- * supplémentaire ici créerait un second état d'appel côté natif, donc des
- * divergences impossibles à déboguer.
+ * Aucune logique d'appel ici : le natif exécute, Dart décide. Toute logique
+ * supplémentaire créerait un second état d'appel côté natif, donc des
+ * divergences impossibles à déboguer (c'est exactement ce qui se produisait
+ * avec la notification native affichée « en plus » de la page Flutter).
  */
 class MainActivity : FlutterActivity() {
 
@@ -53,8 +60,23 @@ class MainActivity : FlutterActivity() {
                         startService(intent)
                         result.success(null)
                     }
+                    "ringStart" -> {
+                        CallRinger.start(applicationContext)
+                        result.success(null)
+                    }
+                    "ringStop" -> {
+                        CallRinger.stop()
+                        result.success(null)
+                    }
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    override fun onDestroy() {
+        // L'activité disparaît (processus tué, changement de configuration
+        // extrême) : aucune sonnerie ne doit lui survivre.
+        CallRinger.stop()
+        super.onDestroy()
     }
 }

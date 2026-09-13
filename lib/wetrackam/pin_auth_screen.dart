@@ -18,6 +18,7 @@ import 'package:flutter/services.dart';
 
 import 'api_client.dart';
 import 'app_logger.dart';
+import 'wetro/wetro_binding.dart';
 import 'driver_identity_service.dart';
 import 'eligibility_screen.dart';
 import 'error_catalog.dart';
@@ -150,6 +151,8 @@ class _PinAuthScreenState extends State<PinAuthScreen> {
       // moment, sans bloquer la navigation non plus (les écrans Lots 6-8
       // consulteront RtcConfigService.isAvailable une fois prêts).
       unawaited(RtcConfigService.start());
+      // v17 : l'assistant Wetro naît avec la session authentifiée.
+      unawaited(WetroBinding.start());
       // EPINGLAGE-TLS.md §4-5 : "à chaque démarrage/reconnexion" —
       // l'authentification réussie en est une, au même titre que le
       // démarrage de l'app (déjà couvert dans main.dart).

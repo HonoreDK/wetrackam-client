@@ -60,7 +60,9 @@
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Photothèque requise pour importer la photo de votre permis de conduire</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Microphone requis pour les appels et les notes vocales avec vos collègues</string>
+	<string>Microphone requis pour les appels, les notes vocales et pour parler à Wetro, votre assistant</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>La reconnaissance vocale permet de parler à Wetro, votre assistant WeTrackam.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Location required in background</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

@@ -94,6 +94,20 @@ class ErrorCatalog {
     // par un raccrochage. Le distinguer évite de laisser croire que le
     // collègue a raccroché volontairement.
     'mediaLost': 'Connexion perdue avec votre collègue.',
+    // v17 — fins d'appel annoncées par le répartiteur (call_navigator.dart)
+    // après le retrait de l'écran d'appel : chaque cause a sa phrase, aucune
+    // n'est un texte technique.
+    'networkUnavailable': 'Pas de connexion. Réessayez.',
+    'declined': 'Appel refusé.',
+    'timeout': 'Pas de réponse.',
+    'mediaUnavailable': 'Micro ou audio indisponible. Vérifiez l\'autorisation du micro.',
+    'answerRejected': 'Impossible d\'établir la communication. Réessayez.',
+    'peerValidationUnavailable': 'Service momentanément indisponible. Réessayez.',
+    'alreadyInCall': 'Un appel est déjà en cours.',
+    'callUnknown': '', // appel déjà clos côté serveur : fin normale, rien à dire
+    'callState': '', // acceptation arrivée trop tard : l'appelant a déjà raccroché
+    'peerInvalid': 'Ce collègue n\'est pas joignable.',
+    'rateLimited': 'Trop d\'appels en peu de temps. Patientez un instant.',
 
 
     // --- 404

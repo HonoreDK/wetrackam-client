@@ -81,7 +81,7 @@ if android.exists():
         errors.append(f"google-services.json invalide: {exc}")
 
 pubspec = (ROOT / "pubspec.yaml").read_text(encoding="utf-8")
-if "name: wetrackam_client" not in pubspec or "version: 17.0.0+170" not in pubspec:
+if "name: wetrackam_client" not in pubspec or "version: 17.1.0+171" not in pubspec:
     errors.append("pubspec.yaml: nom ou version V17 incorrect")
 project = (ROOT / "ios/Runner.xcodeproj/project.pbxproj").read_text(encoding="utf-8")
 if "PRODUCT_BUNDLE_IDENTIFIER = cm.wetrackam.driver;" not in project:

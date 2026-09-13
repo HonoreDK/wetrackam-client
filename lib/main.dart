@@ -14,6 +14,9 @@ import 'configuration_service.dart';
 import 'wetrackam/theme.dart';
 import 'wetrackam/app_logger.dart';
 import 'wetrackam/call_navigator.dart';
+import 'wetrackam/wetro/wetro_binding.dart';
+import 'wetrackam/wetro/wetro_overlay.dart';
+import 'wetrackam/wetro/wetro_runtime.dart';
 import 'wetrackam/call_service.dart';
 import 'wetrackam/chat_service.dart';
 import 'wetrackam/network_watcher.dart';
@@ -86,6 +89,9 @@ void main() async {
   // d'exécution (voir driver_identity_service.dart::purgeTokenOnly/All) :
   // ce commentaire et cet ordre ne doivent plus être dissociés.
   DriverIdentityService.registerTokenPurgeHook(() async => CallService.hangUp());
+  // v17 : Wetro suit la session — conversation effacée, micro fermé, bouton
+  // retiré sur TOUTE purge (jeton ou totale).
+  DriverIdentityService.registerTokenPurgeHook(WetroBinding.stop);
   // Lot 6 : fermer la socket temps réel sur toute purge — une session
   // invalide ne doit plus recevoir de présence/messages/appels. Doit venir
   // APRÈS CallService.hangUp() (voir commentaire ci-dessus).
@@ -104,7 +110,8 @@ void main() async {
   ChatService.init();
   VoiceNoteService.init();
   CallService.init();
-  CallNavigator.start();
+  CallNavigator.start(messenger: () => messengerKey.currentState);
+  WetroBinding.configure(navigatorKey);
   // v13 : bascule Wi-Fi <-> données mobiles. Sans cet observateur, l'ICE
   // restart existait dans CallService mais n'était déclenché par personne :
   // un appel survivait rarement à un changement de réseau.
@@ -137,6 +144,8 @@ void main() async {
     // GeolocationBridge.start() ne se déclencherait jamais.
     unawaited(GeolocationBridge.start());
     unawaited(RtcConfigService.start());
+    // v17 : l'assistant vit avec la session (l'écran PIN le démarre aussi).
+    unawaited(WetroBinding.start());
     // v6 §5 : filet de sécurité au tout premier chargement, même sans
     // passer par l'écran PIN (session déjà valide au démarrage).
     unawaited(StateSyncService.fetchState());
@@ -195,6 +204,18 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
   /// téléphonie), ce que cette exception garantit.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // v17 : la surface de sonnerie d'un appel entrant suit le premier plan
+    // (page Flutter visible, ou notification native quand l'écran est
+    // verrouillé / l'application derrière une autre). Toujours une seule.
+    // `inactive` (volet de notifications, appel système) n'est pas un
+    // passage en arrière-plan : on ne change rien.
+    if (state == AppLifecycleState.resumed) {
+      CallService.onAppForeground(true);
+      CallNavigator.sync();
+    } else if (state == AppLifecycleState.paused || state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      CallService.onAppForeground(false);
+    }
     if (state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
       if (CallService.phase == CallPhase.idle) {
         RealtimeService.disconnect(userIntent: false);
@@ -252,6 +273,11 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver {
     return MaterialApp(
       navigatorKey: navigatorKey, // Lot 8 : requis par call_navigator.dart
       scaffoldMessengerKey: messengerKey,
+      // v17 : Wetro — bouton flottant + panneau au-dessus du Navigator, sur
+      // tous les écrans ; l'observateur relance le balayage des obstacles
+      // à chaque navigation et escamote le bouton sous un dialogue.
+      navigatorObservers: [WetroRouteObserver()],
+      builder: (context, child) => WetroOverlay(child: child ?? const SizedBox.shrink()),
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       theme: WetrackamTheme.light(),

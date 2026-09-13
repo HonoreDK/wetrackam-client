@@ -13,6 +13,7 @@ import 'realtime_service.dart';
 import 'rtc_config_service.dart';
 import 'state_sync_service.dart';
 import 'theme.dart';
+import 'wetro/wetro_binding.dart';
 
 class DiagnosticsScreen extends StatefulWidget {
   const DiagnosticsScreen({super.key});
@@ -58,6 +59,12 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
             _row('wsUrl', rtc.wsUrl ?? '—'),
             _row('callsEnabled', rtc.policy.callsEnabled.toString()),
             _row('chatEnabled', rtc.policy.chatEnabled.toString()),
+          ]),
+          // v17 : « pourquoi le bouton Wetro n'est pas là » se lit ici. La
+          // ligne Build prouve d'abord que l'application installée est bien
+          // celle qui contient l'assistant.
+          _section('Assistant Wetro', [
+            for (final e in WetroBinding.diagnostic().entries) _row(e.key, e.value),
           ]),
           const SizedBox(height: 16),
           Text('Traces récentes (les plus récentes en haut)',

@@ -754,6 +754,44 @@ class WetrackamApiClient {
     throw ApiException(response.statusCode, body['error']?.toString() ?? 'unknown');
   }
 
+  // -----------------------------------------------------------------
+  // v17 — Wetro, l'assistant du chauffeur (WetroDriverResource)
+  // -----------------------------------------------------------------
+
+  /// Disponibilité, sources, actions et époque de l'assistant pour CETTE
+  /// session chauffeur. Jamais mis en cache : le serveur relit la politique
+  /// de l'espace à chaque appel.
+  static Future<Map<String, dynamic>> fetchWetroState() async {
+    final headers = await _authHeaders();
+    final response = await _send(() =>
+        _client.get(_uri('/api/mobile/wetro/state'), headers: headers)
+            .timeout(_readTimeout));
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    }
+    final body = _parseError(response);
+    throw ApiException(response.statusCode, body['error']?.toString() ?? 'unknown',
+        reason: body['reason']?.toString());
+  }
+
+  /// Pose une question à Wetro. `history`, `voice`, `driving` et `actions`
+  /// sont des indications de FORME et de capacité : le serveur relit
+  /// lui-même la politique et valide toute action contre ses propres listes.
+  /// La réponse d'un modèle peut prendre plusieurs secondes : délai propre.
+  static Future<Map<String, dynamic>> askWetro(Map<String, Object?> body) async {
+    final headers = await _authHeaders();
+    headers['Content-Type'] = 'application/json';
+    final response = await _send(() => _client
+        .post(_uri('/api/mobile/wetro/ask'), headers: headers, body: jsonEncode(body))
+        .timeout(const Duration(seconds: 45)));
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    }
+    final parsed = _parseError(response);
+    throw ApiException(response.statusCode, parsed['error']?.toString() ?? 'unknown',
+        reason: parsed['reason']?.toString());
+  }
+
   /// §6 : déliaison propre depuis l'application (changement de téléphone,
   /// revente). Après un 200, l'appelant fait une purge totale.
   static Future<void> unbind() async {

@@ -1,20 +1,24 @@
 // lib/wetrackam/incoming_call_screen.dart
 //
-// Lot 8 — écran d'appel entrant. Affiché automatiquement par le
-// répartiteur global (voir call_navigator.dart) dès `call.incoming`.
+// Lot 8 — écran d'appel entrant. Affiché par le répartiteur global
+// (call_navigator.dart) quand l'appel sonne DANS l'application (Android au
+// premier plan). La sonnerie, elle, est native (CallRinger) et pilotée par
+// CallService : cet écran ne fait que montrer et transmettre les gestes.
 //
-// Bug trouvé en vérification : la première version ne réagissait à aucun
-// changement de phase — si l'appelant raccrochait avant que l'appelé ne
-// décroche (call.cancel/call.ended reçu pendant l'affichage de cet
-// écran), l'écran de sonnerie restait affiché indéfiniment, sans bouton
-// retour possible (PopScope canPop:false). Converti en StatefulWidget
-// pour écouter CallService.phaseChanges et se fermer tout seul.
+// v17 — cet écran ne navigue plus. Le répartiteur le remplace par l'écran
+// d'appel en cours dès que la phase passe à `connected` (décrochage ici OU
+// sur l'écran natif), et le retire au retour au repos (refus, annulation
+// par l'appelant, délai). Avant, un décrochage natif laissait cette page
+// affichée avec ses boutons alors que la communication était établie.
+//
+// Le geste est immédiat : dès l'appui sur « Accepter », la sonnerie cesse et
+// l'écran affiche « Connexion… » pendant l'ouverture du micro — comme un
+// téléphone, pas comme un formulaire.
 import 'dart:async';
 
 import 'package:flutter/material.dart';
 
 import 'call_service.dart';
-import 'in_call_screen.dart';
 import 'theme.dart';
 
 class IncomingCallScreen extends StatefulWidget {
@@ -25,29 +29,25 @@ class IncomingCallScreen extends StatefulWidget {
 }
 
 class _IncomingCallScreenState extends State<IncomingCallScreen> {
-  StreamSubscription<CallPhase>? _phaseSub;
+  StreamSubscription<void>? _uiSub;
 
   @override
   void initState() {
     super.initState();
-    _phaseSub = CallService.phaseChanges.listen((phase) {
-      if (!mounted) return;
-      // L'appelant a raccroché/annulé avant que cet écran n'ait été
-      // fermé par un accepter/refuser explicite — se ferme tout seul,
-      // silencieusement (pas de message : c'est un scénario normal, pas
-      // une erreur).
-      if (phase == CallPhase.idle) Navigator.of(context).pop();
+    _uiSub = CallService.uiChanges.listen((_) {
+      if (mounted) setState(() {});
     });
   }
 
   @override
   void dispose() {
-    _phaseSub?.cancel();
+    _uiSub?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final answering = CallService.answering;
     return PopScope(
       canPop: false, // pas de retour accidentel — passer par accepter/refuser
       child: Scaffold(
@@ -66,46 +66,31 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
                     Text(CallService.peerName ?? 'Appel entrant',
                         style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w600)),
                     const SizedBox(height: 8),
-                    const Text('Appel entrant...', style: TextStyle(color: WetrackamColors.slate)),
+                    Text(answering ? 'Connexion…' : 'Appel entrant…',
+                        style: const TextStyle(color: WetrackamColors.slate)),
                   ],
                 ),
                 Padding(
                   padding: const EdgeInsets.only(bottom: 32),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      _actionButton(
-                        icon: Icons.call_end,
-                        color: WetrackamColors.error,
-                        label: 'Refuser',
-                        // Pas de pop() ici : CallService.declineCall()
-                        // déclenche _cleanup() → phase idle → le
-                        // _phaseSub ci-dessus ferme déjà cet écran. Un
-                        // second pop() ici aurait fermé une route de trop
-                        // (bug trouvé en vérification).
-                        onTap: () => CallService.declineCall(),
-                      ),
-                      _actionButton(
-                        icon: Icons.call,
-                        color: WetrackamColors.success,
-                        label: 'Accepter',
-                        onTap: () async {
-                          await CallService.acceptCall();
-                          // Vérifie la phase RÉELLE plutôt que de supposer
-                          // le succès : si acceptCall() a échoué en
-                          // interne (micro refusé, PeerConnection...), il
-                          // s'est déjà repositionné sur idle via
-                          // _cleanup() — pousser vers InCallScreen dans ce
-                          // cas aurait affiché un écran d'appel pour un
-                          // appel déjà terminé (bug trouvé en vérification).
-                          if (context.mounted && CallService.phase == CallPhase.connected) {
-                            Navigator.of(context).pushReplacement(
-                                MaterialPageRoute(builder: (_) => const InCallScreen()));
-                          }
-                        },
-                      ),
-                    ],
-                  ),
+                  child: answering
+                      ? const CircularProgressIndicator(color: Colors.white70)
+                      : Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                          children: [
+                            _actionButton(
+                              icon: Icons.call_end,
+                              color: WetrackamColors.error,
+                              label: 'Refuser',
+                              onTap: () => CallService.declineCall(),
+                            ),
+                            _actionButton(
+                              icon: Icons.call,
+                              color: WetrackamColors.success,
+                              label: 'Accepter',
+                              onTap: () => CallService.acceptCall(),
+                            ),
+                          ],
+                        ),
                 ),
               ],
             ),

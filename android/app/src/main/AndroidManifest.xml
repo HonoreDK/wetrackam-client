@@ -114,5 +114,14 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+        <!-- v17 — assistant Wetro : dictée par le service de reconnaissance du
+             système (Android 11+ exige de déclarer ce qu'on interroge). -->
+        <intent>
+            <action android:name="android.speech.RecognitionService"/>
+        </intent>
+        <!-- Synthèse vocale des réponses de Wetro. -->
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE"/>
+        </intent>
     </queries>
 </manifest>

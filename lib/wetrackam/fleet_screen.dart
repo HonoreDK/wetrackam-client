@@ -31,7 +31,6 @@ import 'app_logger.dart';
 import 'call_service.dart';
 import 'fleet_units.dart';
 import 'conversation_screen.dart';
-import 'in_call_screen.dart';
 import 'peer_name_cache.dart';
 import 'realtime_service.dart';
 import 'rtc_config_service.dart';
@@ -104,7 +103,9 @@ class _FleetScreenState extends State<FleetScreen> with WidgetsBindingObserver {
           const SnackBar(content: Text('Un appel est déjà en cours.')));
       return;
     }
-    Navigator.push(context, MaterialPageRoute(builder: (_) => const InCallScreen()));
+    // v17 : l'écran d'appel est ouvert par le répartiteur (call_navigator)
+    // dès que la phase bascule — plus de navigation locale, une seule
+    // route d'appel pour toute l'application.
     await CallService.placeCall(peerId: driverId, peerName: name);
   }
 

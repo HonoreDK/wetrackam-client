@@ -10,7 +10,6 @@ import 'api_client.dart';
 import 'app_logger.dart';
 import 'call_service.dart';
 import 'conversation_screen.dart';
-import 'in_call_screen.dart';
 import 'peer_name_cache.dart';
 import 'realtime_service.dart';
 import 'rtc_config_service.dart';
@@ -118,19 +117,18 @@ class _DirectoryScreenState extends State<DirectoryScreen> {
     _debounce = Timer(const Duration(milliseconds: 400), () => _load(query: value));
   }
 
-  /// Navigation IMMÉDIATE vers InCallScreen (qui affiche "Appel en
-  /// cours...") — placeCall() complète ensuite en arrière-plan et fait
-  /// évoluer l'écran via CallService.phaseChanges. Règle 3 du contrat (un
-  /// seul appel actif) : bouton ignoré si un appel est déjà en cours,
-  /// plutôt que de laisser l'utilisateur croire qu'il en démarre un
-  /// second qui sera silencieusement rejeté côté service.
+  /// Règle 3 du contrat (un seul appel actif) : bouton ignoré si un appel
+  /// est déjà en cours, plutôt que de laisser l'utilisateur croire qu'il en
+  /// démarre un second qui sera silencieusement rejeté côté service.
   Future<void> _placeCall(int driverId, String name) async {
     if (CallService.phase != CallPhase.idle) {
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Un appel est déjà en cours.')));
       return;
     }
-    Navigator.push(context, MaterialPageRoute(builder: (_) => const InCallScreen()));
+    // v17 : l'écran d'appel est ouvert par le répartiteur (call_navigator)
+    // dès que la phase bascule — plus de navigation locale, une seule
+    // route d'appel pour toute l'application.
     await CallService.placeCall(peerId: driverId, peerName: name);
   }
 

@@ -53,3 +53,4 @@ Pour configurer ce secret sur le dépôt GitHub :
 L'APK debug produit est téléchargeable comme artefact du run, dans l'onglet
 Actions du dépôt.
 "# wetrackam-client"  
+# wetrackam-client

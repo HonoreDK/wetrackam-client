@@ -29,8 +29,10 @@ class GeolocationBridge {
   /// le gating "aucun envoi hors service" (§8.1 règle 1) soit à jour.
   static Future<void> refreshDriverIdentity() => GeolocationService.refreshDriverIdentity();
 
-  /// §9 — tentative best-effort de vidage de la file avant fin de service.
-  /// Ne lève jamais d'exception : un échec réseau laisse la file intacte,
-  /// à rejouer au prochain service (comportement voulu, pas une erreur).
+  /// §9 — tentative best-effort de vidage de la file : à la fin de service
+  /// (shift_service.dart) et au retour de connectivité après une coupure
+  /// (network_watcher.dart). Ne lève jamais d'exception : un échec réseau
+  /// laisse la file intacte, à rejouer à la prochaine occasion (comportement
+  /// voulu, pas une erreur).
   static Future<void> flushPendingBuffer() => GeolocationService.flushPendingBuffer();
 }

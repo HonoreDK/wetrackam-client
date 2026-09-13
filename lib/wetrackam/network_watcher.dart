@@ -7,11 +7,22 @@
 // de l'entrepôt perdait donc l'audio sans que rien ne tente la renégociation.
 //
 // Ce service est volontairement minuscule et sans état métier : il observe
-// connectivity_plus et rediffuse deux effets, tous deux idempotents :
-//   1. CallService.restartIceOnNetworkChange() — no-op hors appel connecté ;
+// connectivity_plus et rediffuse trois effets, tous idempotents :
+//   1. GeolocationBridge.flushPendingBuffer() — vide le buffer de positions
+//      accumulé hors ligne (§9, même mécanisme qu'en fin de service) ; vidé
+//      EN PREMIER, avant la resynchronisation d'état, pour que les positions
+//      captées pendant la coupure atteignent le serveur au plus tôt plutôt
+//      que d'attendre la prochaine position captée (qui peut tarder selon
+//      les filtres de distance/intervalle) ;
 //   2. RealtimeService.ensureConnected() — no-op si la socket est déjà
 //      ouverte, mais raccourcit fortement le retour en ligne après un tunnel
 //      ou une bascule d'antenne (sinon on attend le backoff exponentiel).
+//      Son ouverture déclenche elle-même `control.resync` côté serveur
+//      (state_sync_service.dart), donc la resynchronisation d'état arrive
+//      nécessairement après le vidage du buffer ci-dessus ;
+//   3. CallService.restartIceOnNetworkChange() — no-op hors appel connecté ;
+//      doit rester après (1) : la signalisation de l'ICE restart passe par
+//      la socket, un restart envoyé sur une socket fermée serait perdu.
 //
 // Anti-rebond : Android émet fréquemment plusieurs événements pour une seule
 // bascule réelle (perte Wi-Fi, aucun réseau, données mobiles). Sans le délai
@@ -23,6 +34,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 
 import 'app_logger.dart';
 import 'call_service.dart';
+import 'geolocation_bridge.dart';
 import 'realtime_service.dart';
 
 class NetworkWatcher {
@@ -71,9 +83,18 @@ class NetworkWatcher {
       // agressif. Un raté de reconnexion ici n'est pas fatal : le backoff
       // exponentiel normal de RealtimeService reprendra la main.
       try {
-        // Ordre voulu : la socket d'abord (la signalisation de l'ICE restart
-        // passe par elle — un restart envoyé sur une socket fermée serait
-        // silencieusement perdu, cf. RealtimeService.send).
+        // Ordre voulu : le buffer de positions hors ligne d'abord (§9, canal
+        // HTTP indépendant de la socket) — les positions captées pendant la
+        // coupure partent dès que le réseau revient, sans attendre qu'une
+        // nouvelle position soit captée. Best-effort, ne lève jamais
+        // d'exception (voir geolocation_bridge.dart) : un échec ici ne doit
+        // pas empêcher la reconnexion de la socket ci-dessous.
+        if (wasOffline) await GeolocationBridge.flushPendingBuffer();
+        // Puis la socket (la signalisation de l'ICE restart passe par elle —
+        // un restart envoyé sur une socket fermée serait silencieusement
+        // perdu, cf. RealtimeService.send). Son ouverture déclenche elle-même
+        // `control.resync` côté serveur, donc la resynchronisation d'état
+        // arrive nécessairement après le vidage du buffer ci-dessus.
         await RealtimeService.ensureConnected();
         await CallService.restartIceOnNetworkChange();
         if (wasOffline) AppLogger.breadcrumb('network_back_online');

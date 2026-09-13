@@ -132,6 +132,11 @@ class GeolocationService {
   /// intacte et sera rejouée au prochain service (comportement voulu, pas
   /// une erreur — voir geolocation_bridge.dart).
   ///
+  /// Second appelant : network_watcher.dart, dès que la connectivité revient
+  /// après une coupure — les positions captées hors ligne partent alors sans
+  /// attendre la prochaine position captée (qui peut tarder selon les
+  /// filtres de distance/intervalle).
+  ///
   /// ⚠️ Limite connue, à vérifier sur appareil réel : si le plugin rend le
   /// template HTTP au moment de l'ENVOI (et non à la capture), une
   /// position capturée sous le véhicule A mais encore en file au moment où
@@ -143,7 +148,7 @@ class GeolocationService {
   static Future<void> flushPendingBuffer() async {
     try {
       await bg.BackgroundGeolocation.sync();
-      AppLogger.breadcrumb('pending_buffer_flushed_before_shift_end');
+      AppLogger.breadcrumb('pending_buffer_flushed');
     } catch (error) {
       AppLogger.error('flush_buffer_failed', error);
     }

@@ -45,7 +45,7 @@ dependencies:
   just_audio: ^0.9.42
   # Lot 8 — appels WebRTC. ⚠️ Version à reconfirmer au `flutter pub get` :
   # aucune compilation possible dans cet environnement pour la vérifier.
-  flutter_webrtc: ^1.5.2
+  flutter_webrtc: ^1.6.2+hotfix.1
   # v13 — carte réelle des collègues (OpenStreetMap, aucune clé API requise,
   # aucune configuration native : tuiles servies en HTTPS par le réseau OSM).
   flutter_map: ^8.3.1

@@ -41,7 +41,7 @@ dependencies:
   web_socket_channel: ^3.0.1
   # Lot 7 — notes vocales : enregistrement + lecture (upload/téléchargement
   # via URL signée, jamais par la socket — voir voice_note_service.dart)
-  record: ^6.2.1
+  record: ^7.1.1
   just_audio: ^0.9.42
   # Lot 8 — appels WebRTC. ⚠️ Version à reconfirmer au `flutter pub get` :
   # aucune compilation possible dans cet environnement pour la vérifier.

@@ -49,7 +49,7 @@ dependencies:
   # v13 — carte réelle des collègues (OpenStreetMap, aucune clé API requise,
   # aucune configuration native : tuiles servies en HTTPS par le réseau OSM).
   flutter_map: ^8.3.1
-  latlong2: ^0.9.1
+  latlong2: ^0.10.1
   # v13 — bascule réseau (Wi-Fi <-> données mobiles) : déclenche un ICE
   # restart au lieu de laisser l'appel mourir en silence (règle 6 du §12).
   connectivity_plus: ^7.3.1

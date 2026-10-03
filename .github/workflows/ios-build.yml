@@ -79,6 +79,25 @@ jobs:
       - name: Compiler sans signature
         run: flutter build ios --release --no-codesign
 
+      # `flutter build ... --no-codesign` ne signe pas le binaire principal,
+      # mais certains frameworks tiers embarqués (ex. TSLocationManager.
+      # framework, du plugin flutter_background_geolocation) sont fournis
+      # déjà signés par leur éditeur, avec une identité différente de celle
+      # qu'utilisera Sideloadly/AltStore pour re-signer l'app à
+      # l'installation. iOS refuse alors l'app entière : « code signature
+      # verification failed » sur ce framework (deux identités de
+      # signature différentes dans le même bundle). On retire donc
+      # explicitement toute signature existante sur l'app et tout ce
+      # qu'elle embarque, pour que l'outil de sideload reparte d'une base
+      # totalement vierge et signe tout de façon cohérente.
+      - name: Retirer les signatures existantes (frameworks tiers déjà signés)
+        run: |
+          APP=build/ios/iphoneos/Runner.app
+          find "$APP" -name "*.framework" -o -name "*.dylib" -o -name "*.appex" | while read -r item; do
+            codesign --remove-signature "$item" || true
+          done
+          codesign --remove-signature "$APP" || true
+
       - name: Empaqueter en IPA
         run: |
           mkdir -p build/ios/ipa/Payload

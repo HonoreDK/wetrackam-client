@@ -60,8 +60,11 @@ l'iPhone reste sur le même réseau Wi-Fi que l'ordinateur.
 
 - **Notifications push (Firebase)** : aucun `GoogleService-Info.plist`
   n'est configuré côté iOS dans ce dépôt (seul Android l'est, voir
-  `firebase.json`). `Firebase.initializeApp()` échoue proprement
-  (`try`/`catch`, voir `push_notifications_service.dart`) : l'app démarre
-  normalement, mais sans notifications. Hors périmètre de cette notice.
+  `firebase.json`). Le workflow CI en crée un **placeholder** juste pour
+  que Xcode accepte de compiler (c'est une entrée de build attendue par le
+  projet) — ses valeurs ne sont pas réelles. `Firebase.initializeApp()`
+  échoue proprement avec ce placeholder (`try`/`catch`, voir
+  `push_notifications_service.dart`) : l'app démarre normalement, mais
+  sans notifications. Hors périmètre de cette notice.
 - **Appel entrant application fermée (PushKit)** : documenté comme limite
   connue depuis la v13 du projet, indépendant de la méthode d'installation.

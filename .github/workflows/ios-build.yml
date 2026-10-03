@@ -20,6 +20,55 @@ jobs:
 
       - run: flutter pub get
 
+      # Le projet Xcode référence ios/Runner/GoogleService-Info.plist comme
+      # entrée de build (étape "Copy Bundle Resources"), mais ce fichier
+      # n'a jamais été ajouté au dépôt : Firebase/FCM n'est pas configuré
+      # côté iOS (seul android/app/google-services.json l'est, voir
+      # firebase.json). Sans ce fichier, Xcode refuse de compiler, même si
+      # Firebase.initializeApp() échoue déjà proprement à l'exécution
+      # (try/catch, voir push_notifications_service.dart). Ce placeholder
+      # satisfait uniquement l'étape de build ; les notifications push ne
+      # fonctionneront pas sur cette installation (voir
+      # WETRACKAM-CLIENT-IOS-SIDELOAD.md §5).
+      - name: Créer un GoogleService-Info.plist placeholder (build only, FCM non fonctionnel)
+        run: |
+          cat > ios/Runner/GoogleService-Info.plist << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+          	<key>CLIENT_ID</key>
+          	<string>placeholder</string>
+          	<key>REVERSED_CLIENT_ID</key>
+          	<string>placeholder</string>
+          	<key>API_KEY</key>
+          	<string>placeholder</string>
+          	<key>GCM_SENDER_ID</key>
+          	<string>000000000000</string>
+          	<key>PLIST_VERSION</key>
+          	<string>1</string>
+          	<key>BUNDLE_ID</key>
+          	<string>cm.wetrackam.driver</string>
+          	<key>PROJECT_ID</key>
+          	<string>wetrackam-client-placeholder</string>
+          	<key>STORAGE_BUCKET</key>
+          	<string>wetrackam-client-placeholder.appspot.com</string>
+          	<key>IS_ADS_ENABLED</key>
+          	<false/>
+          	<key>IS_ANALYTICS_ENABLED</key>
+          	<false/>
+          	<key>IS_APPINVITE_ENABLED</key>
+          	<false/>
+          	<key>IS_GCM_ENABLED</key>
+          	<true/>
+          	<key>IS_SIGNIN_ENABLED</key>
+          	<false/>
+          	<key>GOOGLE_APP_ID</key>
+          	<string>1:000000000000:ios:0000000000000000000000</string>
+          </dict>
+          </plist>
+          EOF
+
       - name: Installer les pods iOS
         run: cd ios && pod install
 

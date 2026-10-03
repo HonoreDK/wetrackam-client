@@ -29,7 +29,7 @@ dependencies:
   uuid: ^4.5.1
   flutter_secure_storage: ^10.0.0
   app_links: ^7.0.0
-  app_settings: ^7.0.0
+  app_settings: ^9.0.0
   # Lot 4 (contrat v5 §7.5/§8) : FCM v1 réintroduit — le contrat v4 exigeait
   # le retrait de Firebase, le v5 l'exige de nouveau spécifiquement pour le
   # push. Voir RAPPORT_LIVRAISON_V4.md pour l'historique du retrait initial.

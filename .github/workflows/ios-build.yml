@@ -1,0 +1,44 @@
+name: iOS Build (non signé, pour sideload)
+
+# Déclenchement manuel uniquement : les runners macOS consomment les minutes
+# GitHub Actions ~10x plus vite que les runners Linux (ci.yml/analyze.yml).
+# Lancer depuis l'onglet Actions > iOS Build (non signé, pour sideload) >
+# Run workflow, quand une IPA à sideloader est réellement nécessaire.
+on:
+  workflow_dispatch:
+
+jobs:
+  build_ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.5'
+          channel: 'stable'
+
+      - run: flutter pub get
+
+      - name: Installer les pods iOS
+        run: cd ios && pod install
+
+      # Pas de compte Apple Developer en CI : build sans signature. L'IPA
+      # obtenue est signée ensuite localement par Sideloadly/AltStore, avec
+      # un identifiant Apple gratuit, au moment de l'installation sur
+      # l'iPhone (cf. WETRACKAM-CLIENT-IOS-SIDELOAD.md).
+      - name: Compiler sans signature
+        run: flutter build ios --release --no-codesign
+
+      - name: Empaqueter en IPA
+        run: |
+          mkdir -p build/ios/ipa/Payload
+          cp -r build/ios/iphoneos/Runner.app build/ios/ipa/Payload/
+          cd build/ios/ipa
+          zip -r ../WeTrackam.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wetrackam-ios-unsigned
+          path: build/ios/WeTrackam.ipa
+          retention-days: 14
